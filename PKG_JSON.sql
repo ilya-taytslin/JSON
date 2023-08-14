@@ -1,7 +1,41 @@
 create or replace PACKAGE BODY PKG_JSON AS
 
+    isi_CurrentDebugLevel SMALLINT := OFF_DEBUG_LEVEL;
+
+    PROCEDURE SET_SESSION_DEBUG_LEVEL( asi_DebugLevel  IN SMALLINT )
+    IS
+    
+        lExcpt_InvalidLoggingLevel EXCEPTION;
+    
+        ls_MethodName              VARCHAR2(128);
+    
+    BEGIN
+    
+        ls_MethodName := 'SET_SESSION_DEBUG_LEVEL';
+    
+        If ( ( asi_DebugLevel != OFF_DEBUG_LEVEL ) AND
+             ( asi_DebugLevel != ERROR_DEBUG_LEVEL ) AND
+             ( asi_DebugLevel != WARNING_DEBUG_LEVEL ) AND
+             ( asi_DebugLevel != INFORMATIONAL_DEBUG_LEVEL ) AND
+             ( asi_DebugLevel != PERFORMANCE_METRICS_DEBUG_LEVEL ) AND
+             ( asi_DebugLevel != VERBOSE_DEBUG_LEVEL ) ) Then
+    
+            RAISE lExcpt_InvalidLoggingLevel;
+    
+        Else
+    
+            isi_CurrentDebugLevel := asi_DebugLevel;
+    
+        End If;
+    
+    
+    END SET_SESSION_DEBUG_LEVEL;
+    
+    
  procedure chart_area_json (v_result OUT clob )
   is
+
+   AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
   vcronjob                           VARCHAR2(150)  := 'ON DEMAND';
  	    vbatchprocess                  VARCHAR2 (150)  := NULL;
 	    vmodulename                    varchar2 (150)  := 'DEALER_COMPLY'; 
@@ -31,11 +65,20 @@ create or replace PACKAGE BODY PKG_JSON AS
     select a.area_code
     from area_data a) loop
     
-        area_object.put('AREA_CODE', a_data.area_code);
+        area_object.put(AREA_CODE, a_data.area_code);
+        
+         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE('Area code:' || area_object.to_clob());
+         END IF;
     
         area_array.append(area_object);
-        area_object.remove('AREA_CODE');
+        --Start cleaning JSON object
+        area_object.remove(AREA_CODE);
     end loop;
+    
+     IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+        DBMS_OUTPUT.PUT_LINE('Area JSON:' || area_array.to_clob());
+     END IF;
     
     v_result := area_array.to_clob();
 
@@ -52,7 +95,8 @@ create or replace PACKAGE BODY PKG_JSON AS
 /****************************************************************************************************/
  procedure gear_json (v_result OUT clob )
   is
-  vcronjob                           VARCHAR2(150)  := 'ON DEMAND';
+        
+        vcronjob                       VARCHAR2(150)   := 'ON DEMAND';
  	    vbatchprocess                  VARCHAR2 (150)  := NULL;
 	    vmodulename                    varchar2 (150)  := 'DEALER_COMPLY'; 
 		vprocedurename                 VARCHAR2 (255)  := 'GEAR_JSON';
@@ -69,6 +113,25 @@ create or replace PACKAGE BODY PKG_JSON AS
         v_debug  NUMBER;
         v_loop  NUMBER;
         v_maxdate date;
+        v_result_length NUMBER := 0;
+        v_outputed_length NUMBER := 1;   -- Because first position of a string in PL/SQL is 1, not 0
+        
+        ITERATION_LENGTH CONSTANT NUMBER := 4000;
+        
+        GEAR_CODE CONSTANT VARCHAR2(4) := 'CODE';
+        GEAR_NAME CONSTANT VARCHAR2(4) := 'NAME';
+        MESH_MINIMUM CONSTANT VARCHAR2(12) := 'MESH_MINIMUM';
+        MESH_MAXIMUM CONSTANT VARCHAR2(12) := 'MESH_MAXIMUM';
+        QUANTITY_MINIMUM CONSTANT VARCHAR2(16) := 'QUANTITY_MINIMUM';
+        QUANTITY_MAXIMUM CONSTANT VARCHAR2(16) := 'QUANITY_MAXIMUM';
+        SIZE_MINIMUM CONSTANT VARCHAR2(12) := 'SIZE_MINIMUM';
+        SIZE_MAXIMUM CONSTANT VARCHAR2(12) := 'SIZE_MAXIMUM';
+        HAULS_MINIMUM CONSTANT VARCHAR2(13) := 'HAULS_MINIMUM';
+        HAULS_MAXIMUM CONSTANT VARCHAR2(13) := 'HAULS_MAXIMUM';     
+        SOAK_MINIMUM CONSTANT VARCHAR2(12) := 'SOAK_MINIMUM';
+        SOAK_MAXIMUM CONSTANT VARCHAR2(12) := 'SOAK_MAXIMUM';
+        TYPE_CALCULATE CONSTANT VARCHAR2(15) := 'TYPE_CALCULATE';
+        TYPE_VALIDATE CONSTANT VARCHAR2(15) := 'TYPE_VALIDATE';
         
         gear_object  JSON_OBJECT_T := json_object_t();
         gear_array  JSON_ARRAY_T := json_array_t();
@@ -161,41 +224,58 @@ create or replace PACKAGE BODY PKG_JSON AS
            ,g.HAULS_MINIMUM,g.HAULS_MAXIMUM,g.SOAK_MINIMUM,g.SOAK_MAXIMUM,g.TYPE_CALCULATE,g.TYPE_VALIDATE
     from gear_data g) loop
     
-        gear_object := json_object_t();
-        gear_object.put('CODE', g_data.CODE);
-        gear_object.put('NAME', g_data.NAME);
-        gear_object.put('MESH_MINIMUM', g_data.MESH_MINIMUM);
-        gear_object.put('MESH_MAXIMUM', g_data.MESH_MAXIMUM);
-        gear_object.put('QUANTITY_MINIMUM', g_data.QUANTITY_MINIMUM);
-        gear_object.put('QUANITY_MAXIMUM', g_data.QUANITY_MAXIMUM);
-        gear_object.put('SIZE_MINIMUM', g_data.SIZE_MINIMUM);
-        gear_object.put('SIZE_MAXIMUM', g_data.SIZE_MAXIMUM);
-        gear_object.put('HAULS_MINIMUM', g_data.HAULS_MINIMUM);
-        gear_object.put('HAULS_MAXIMUM', g_data.HAULS_MAXIMUM);
-        gear_object.put('SOAK_MINIMUM', g_data.SOAK_MINIMUM);
-        gear_object.put('SOAK_MAXIMUM', g_data.SOAK_MAXIMUM);
-        gear_object.put('TYPE_CALCULATE', g_data.TYPE_CALCULATE);
-        gear_object.put('TYPE_VALIDATE', g_data.TYPE_VALIDATE);
-    
+        gear_object.put(GEAR_CODE, g_data.CODE);
+        gear_object.put(GEAR_NAME, g_data.NAME);
+        gear_object.put(MESH_MINIMUM, g_data.MESH_MINIMUM);
+        gear_object.put(MESH_MAXIMUM, g_data.MESH_MAXIMUM);
+        gear_object.put(QUANTITY_MINIMUM, g_data.QUANTITY_MINIMUM);
+        gear_object.put(QUANTITY_MAXIMUM, g_data.QUANITY_MAXIMUM);
+        gear_object.put(SIZE_MINIMUM, g_data.SIZE_MINIMUM);
+        gear_object.put(SIZE_MAXIMUM, g_data.SIZE_MAXIMUM);
+        gear_object.put(HAULS_MINIMUM, g_data.HAULS_MINIMUM);
+        gear_object.put(HAULS_MAXIMUM, g_data.HAULS_MAXIMUM);
+        gear_object.put(SOAK_MINIMUM, g_data.SOAK_MINIMUM);
+        gear_object.put(SOAK_MAXIMUM, g_data.SOAK_MAXIMUM);
+        gear_object.put(TYPE_CALCULATE, g_data.TYPE_CALCULATE);
+        gear_object.put(TYPE_VALIDATE, g_data.TYPE_VALIDATE);
+        
+         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE('Gear record:' || gear_object.to_clob());
+         END IF;
+         
+        --Add object to array
         gear_array.append(gear_object);
-        gear_object.remove('CODE');   -- repeat for each field
-        gear_object.remove('NAME');
-        gear_object.remove('MESH_MINIMUM');
-        gear_object.remove('MESH_MAXIMUM');
-        gear_object.remove('QUANTITY_MINIMUM');
-        gear_object.remove('QUANTITY_MAXIMUM');
-        gear_object.remove('SIZE_MINIMUM');
-        gear_object.remove('SIZE_MAXIMUM');
-        gear_object.remove('HAULS_MINIMUM');
-        gear_object.remove('HAULS_MAXIMUM');
-        gear_object.remove('SOAK_MINIMUM');
-        gear_object.remove('SOAK_MAXIMUM');
-        gear_object.remove('TYPE_CALCULATE');
-        gear_object.remove('TYPE_VALIDATE');
+        --START cleaning of JSON object. This is needed per key
+        gear_object.remove(GEAR_CODE);
+        gear_object.remove(GEAR_NAME);
+        gear_object.remove(MESH_MINIMUM);
+        gear_object.remove(MESH_MAXIMUM);
+        gear_object.remove(QUANTITY_MINIMUM);
+        gear_object.remove(QUANTITY_MAXIMUM);
+        gear_object.remove(SIZE_MINIMUM);
+        gear_object.remove(SIZE_MAXIMUM);
+        gear_object.remove(HAULS_MINIMUM);
+        gear_object.remove(HAULS_MAXIMUM);
+        gear_object.remove(SOAK_MINIMUM);
+        gear_object.remove(SOAK_MAXIMUM);
+        gear_object.remove(TYPE_CALCULATE);
+        gear_object.remove(TYPE_VALIDATE);
     end loop;
     
     v_result := gear_array.to_clob();
-  --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
+    v_result_length := length(v_result);
+    
+     IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+        DBMS_OUTPUT.PUT_LINE('Area JSON:');   -- || gear_array.to_clob()));
+        WHILE v_result_length > 0
+        LOOP
+            DBMS_OUTPUT.PUT_LINE(substr(v_result, v_outputed_length, ITERATION_LENGTH));
+            v_outputed_length := v_outputed_length + ITERATION_LENGTH;
+            v_result_length := v_result_length - ITERATION_LENGTH;
+        END LOOP;
+     END IF;
+    
+    --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
   EXCEPTION
     WHEN OTHERS THEN
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;

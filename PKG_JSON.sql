@@ -1,3 +1,28 @@
+create or replace package PKG_JSON IS
+
+    -- Public Package Constants
+    
+    VERBOSE_DEBUG_LEVEL             CONSTANT SMALLINT := 5;
+    PERFORMANCE_METRICS_DEBUG_LEVEL CONSTANT SMALLINT := 4;
+    INFORMATIONAL_DEBUG_LEVEL       CONSTANT SMALLINT := 3;
+    WARNING_DEBUG_LEVEL             CONSTANT SMALLINT := 2;
+    ERROR_DEBUG_LEVEL               CONSTANT SMALLINT := 1;
+    OFF_DEBUG_LEVEL                 CONSTANT SMALLINT := 0;
+    
+    -- End Public Package Constants
+    
+    --SET debug level to check what is happening
+    PROCEDURE SET_SESSION_DEBUG_LEVEL( asi_DebugLevel  IN SMALLINT );
+
+    -- MAIN procedure for generating chart area JSON vtr lookup
+    PROCEDURE chart_area_json (v_result OUT CLOB );
+    
+    -- MAIN procedure for generating gear JSON vtr lookup
+    PROCEDURE gear_json (v_result OUT CLOB );
+
+END PKG_JSON;
+/********************************************************************************/
+
 create or replace PACKAGE BODY PKG_JSON AS
 
     isi_CurrentDebugLevel SMALLINT := OFF_DEBUG_LEVEL;
@@ -139,7 +164,8 @@ create or replace PACKAGE BODY PKG_JSON AS
   begin
     --select GET_FSO_SEQ_FNC into ifsoseq from dual; 
 	--fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, NULL, vprocedurename ||' -- currently executing',NULL,NULL,NULL,NULL, ilogid);
-
+    DBMS_OUTPUT.ENABLE(1000000);
+    
     for g_data in (with gear_data as (select gearcode as CODE
             ,GEARNM AS NAME
             ,to_char(MESH_MINIMUM) as  MESH_MINIMUM      -- cast as string
@@ -266,7 +292,7 @@ create or replace PACKAGE BODY PKG_JSON AS
     v_result_length := length(v_result);
     
      IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
-        DBMS_OUTPUT.PUT_LINE('Area JSON:');   -- || gear_array.to_clob()));
+        DBMS_OUTPUT.PUT_LINE('Gear JSON:');   -- || gear_array.to_clob()));
         WHILE v_result_length > 0
         LOOP
             DBMS_OUTPUT.PUT_LINE(substr(v_result, v_outputed_length, ITERATION_LENGTH));

@@ -14,13 +14,16 @@ create or replace package PKG_JSON IS
     --SET debug level to check what is happening
     PROCEDURE SET_SESSION_DEBUG_LEVEL( asi_DebugLevel  IN SMALLINT );
 
-    -- MAIN procedure for generating chart area JSON vtr lookup
+    -- MAIN procedure for generating chart area JSON via NOAA schema lookup
     PROCEDURE chart_area_json (v_result OUT CLOB );
     
-    -- MAIN procedure for generating gear JSON vtr lookup
+    -- Procedure for generating chart area JSON via VTR schema lookup
+    PROCEDURE chart_area_vtr_json (v_result OUT CLOB );
+    
+    -- MAIN procedure for generating gear JSON 
     PROCEDURE gear_json (v_result OUT CLOB );
 
-END PKG_JSON;
+END PKG_JSON
 /********************************************************************************/
 
 create or replace PACKAGE BODY PKG_JSON AS
@@ -55,8 +58,7 @@ create or replace PACKAGE BODY PKG_JSON AS
     
     
     END SET_SESSION_DEBUG_LEVEL;
-    
-    
+/****************************************************************************************************/    
  procedure chart_area_json (v_result OUT clob )
   is
 
@@ -83,10 +85,73 @@ create or replace PACKAGE BODY PKG_JSON AS
         area_array  JSON_ARRAY_T := json_array_t();
         empty_array  JSON_ARRAY_T := json_array_t();
   begin
+    DBMS_OUTPUT.ENABLE(1000000);
+    
     for a_data in (with area_data as (select distinct nemarea as area_code
         FROM noaa.loc2areas
         WHERE NOT REGEXP_LIKE (nemarea, '[0][0-4][0-9]$|[0][5][0]$')
         ORDER BY nemarea ASC)
+    select a.area_code
+    from area_data a) loop
+    
+        area_object.put(AREA_CODE, a_data.area_code);
+        
+         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE('Area code:' || area_object.to_clob());
+         END IF;
+    
+        area_array.append(area_object);
+        --Start cleaning JSON object
+        area_object.remove(AREA_CODE);
+    end loop;
+    
+     IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+        DBMS_OUTPUT.PUT_LINE('Area JSON:' || area_array.to_clob());
+     END IF;
+    
+    v_result := area_array.to_clob();
+
+  --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
+  EXCEPTION
+    WHEN OTHERS THEN
+        errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
+        
+        v_result := empty_array.to_clob();
+      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
+        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
+        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+  end;
+/****************************************************************************************************/    
+ procedure chart_area_vtr_json (v_result OUT clob )
+  is
+
+   AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
+  vcronjob                           VARCHAR2(150)  := 'ON DEMAND';
+ 	    vbatchprocess                  VARCHAR2 (150)  := NULL;
+	    vmodulename                    varchar2 (150)  := 'DEALER_COMPLY'; 
+		vprocedurename                 VARCHAR2 (255)  := 'CHART_AREA_VTR_JSON';
+		vtablename                     VARCHAR2 (50)   := '';	    
+		ilogid                         INT             := 0;
+		VSQL                           varchar2 (4000);		
+        errmsg           VARCHAR2 (2000);
+        sql_stmt             VARCHAR2 (2000);
+        vowner           VARCHAR2 (50)   :='CFDRS';
+        ifsoseq          NUMBER          :=0;
+        v_compliance_start  date;
+        v_compliance_end    date;
+        v_name             VARCHAR2 (25);
+        v_debug  NUMBER;
+        v_loop  NUMBER;
+        v_maxdate date;
+        
+        area_object  JSON_OBJECT_T := json_object_t();
+        area_array  JSON_ARRAY_T := json_array_t();
+        empty_array  JSON_ARRAY_T := json_array_t();
+  begin
+    DBMS_OUTPUT.ENABLE(1000000);
+    
+    for a_data in (with area_data as (SELECT distinct nemarea as area_code
+        FROM vtr.area ORDER BY nemarea ASC)
     select a.area_code
     from area_data a) loop
     
@@ -162,8 +227,6 @@ create or replace PACKAGE BODY PKG_JSON AS
         gear_array  JSON_ARRAY_T := json_array_t();
         empty_array  JSON_ARRAY_T := json_array_t();
   begin
-    --select GET_FSO_SEQ_FNC into ifsoseq from dual; 
-	--fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, NULL, vprocedurename ||' -- currently executing',NULL,NULL,NULL,NULL, ilogid);
     DBMS_OUTPUT.ENABLE(1000000);
     
     for g_data in (with gear_data as (select gearcode as CODE

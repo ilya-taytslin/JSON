@@ -22,8 +22,20 @@ create or replace package PKG_JSON IS
     
     -- MAIN procedure for generating gear JSON 
     PROCEDURE gear_json (v_result OUT CLOB );
+    
+    -- MAIN procedure for generating dealer JSON 
+    PROCEDURE dealer_json (v_input IN CLOB, v_result OUT CLOB );
+    
+    -- Procedure for generating JIRA dealer JSON 
+    PROCEDURE dealer_jira_json (v_result OUT CLOB );    
 
-END PKG_JSON
+    -- Procedure for generating JIRA vessel JSON 
+    PROCEDURE vessel_jira_json (v_result OUT CLOB );
+
+    -- MAIN procedure for generating operator JSON 
+    PROCEDURE operator_json (v_input IN CLOB, v_result OUT CLOB );
+    
+END PKG_JSON;
 /********************************************************************************/
 
 create or replace PACKAGE BODY PKG_JSON AS
@@ -65,7 +77,7 @@ create or replace PACKAGE BODY PKG_JSON AS
    AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
   vcronjob                           VARCHAR2(150)  := 'ON DEMAND';
  	    vbatchprocess                  VARCHAR2 (150)  := NULL;
-	    vmodulename                    varchar2 (150)  := 'DEALER_COMPLY'; 
+	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
 		vprocedurename                 VARCHAR2 (255)  := 'CHART_AREA_JSON';
 		vtablename                     VARCHAR2 (50)   := '';	    
 		ilogid                         INT             := 0;
@@ -128,7 +140,7 @@ create or replace PACKAGE BODY PKG_JSON AS
    AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
   vcronjob                           VARCHAR2(150)  := 'ON DEMAND';
  	    vbatchprocess                  VARCHAR2 (150)  := NULL;
-	    vmodulename                    varchar2 (150)  := 'DEALER_COMPLY'; 
+	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
 		vprocedurename                 VARCHAR2 (255)  := 'CHART_AREA_VTR_JSON';
 		vtablename                     VARCHAR2 (50)   := '';	    
 		ilogid                         INT             := 0;
@@ -188,7 +200,7 @@ create or replace PACKAGE BODY PKG_JSON AS
         
         vcronjob                       VARCHAR2(150)   := 'ON DEMAND';
  	    vbatchprocess                  VARCHAR2 (150)  := NULL;
-	    vmodulename                    varchar2 (150)  := 'DEALER_COMPLY'; 
+	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
 		vprocedurename                 VARCHAR2 (255)  := 'GEAR_JSON';
 		vtablename                     VARCHAR2 (50)   := '';	    
 		ilogid                         INT             := 0;
@@ -355,7 +367,389 @@ create or replace PACKAGE BODY PKG_JSON AS
     v_result_length := length(v_result);
     
      IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
-        DBMS_OUTPUT.PUT_LINE('Gear JSON:');   -- || gear_array.to_clob()));
+        DBMS_OUTPUT.PUT_LINE('Gear JSON:');
+        WHILE v_result_length > 0
+        LOOP
+            DBMS_OUTPUT.PUT_LINE(substr(v_result, v_outputed_length, ITERATION_LENGTH));
+            v_outputed_length := v_outputed_length + ITERATION_LENGTH;
+            v_result_length := v_result_length - ITERATION_LENGTH;
+        END LOOP;
+     END IF;
+    
+    --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
+  EXCEPTION
+    WHEN OTHERS THEN
+        errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
+        
+        v_result := empty_array.to_clob();
+      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
+        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
+        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+  end;
+/****************************************************************************************************/
+ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
+  is
+        
+        vcronjob                       VARCHAR2(150)   := 'ON DEMAND';
+ 	    vbatchprocess                  VARCHAR2 (150)  := NULL;
+	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
+		vprocedurename                 VARCHAR2 (255)  := 'DEALER_JSON';
+		vtablename                     VARCHAR2 (50)   := '';	    
+		ilogid                         INT             := 0;
+		VSQL                           varchar2 (4000);		
+        errmsg           VARCHAR2 (2000);
+        sql_stmt             VARCHAR2 (2000);
+        vowner           VARCHAR2 (50)   :='CFDRS';
+        ifsoseq          NUMBER          :=0;
+        v_compliance_start  date;
+        v_compliance_end    date;
+        v_name             VARCHAR2 (25);
+        v_debug  NUMBER;
+        v_loop  NUMBER := 0;
+        v_maxdate date;
+        v_result_length NUMBER := 0;
+        v_outputed_length NUMBER := 1;   -- Because first position of a string in PL/SQL is 1, not 0
+        
+        ITERATION_LENGTH CONSTANT NUMBER := 4000;
+        
+        DEALER_PERMIT CONSTANT VARCHAR2(20) := 'DEALER_PERMIT_NUMBER';
+        DEALER_NAME CONSTANT VARCHAR2(11) := 'DEALER_NAME';
+      
+        dealer_object  JSON_OBJECT_T := json_object_t();
+        dealer_array  JSON_ARRAY_T := json_array_t();
+        empty_array  JSON_ARRAY_T := json_array_t();
+  begin
+    DBMS_OUTPUT.ENABLE(1000000);
+    
+    for d_data in (with dealer_data as (SELECT  DEALER_PERMIT_NUMBER,  upper(DEALER_NAME) DEALER_NAME
+        FROM
+        (
+        SELECT dnum DEALER_PERMIT_NUMBER, dlr DEALER_NAME
+            FROM
+            (
+            SELECT d.dnum, d.dlr, d.CITY, d.ST, row_number()
+            OVER (PARTITION BY d.dnum ORDER BY d.year desc) r
+            FROM PERMIT.DEALER d
+            WHERE d.year >= (EXTRACT(YEAR from SYSDATE) - 5)
+            AND d.dlr is not null
+            )
+            WHERE r = 1
+            UNION
+            SELECT 1 as dealer_permit_number,'Seized for Violations' as DEALER_NAME FROM dual
+            UNION
+            SELECT 2 as dealer_permit_number,'Sold or Retained as Bait' as DEALER_NAME FROM dual
+            UNION
+            SELECT 4 as dealer_permit_number,'Retained for Future Sale' as DEALER_NAME FROM dual
+            UNION
+            SELECT 5 as dealer_permit_number,'Sold to Non-Federal Dealer' as DEALER_NAME FROM dual
+            UNION
+            SELECT 6 as dealer_permit_number,'Sub Legal Catch Landed for Research' as DEALER_NAME FROM dual
+            UNION
+            SELECT 7 as dealer_permit_number,'Legal Catch Landed for Research (EFP Trips Only)' as DEALER_NAME FROM dual
+            UNION
+            SELECT 8 as dealer_permit_number,'Landed Unmarketable Catch (LUMF)' as DEALER_NAME FROM dual
+            UNION
+            SELECT 99998 as dealer_permit_number,'Home Consumption' as DEALER_NAME FROM dual)  )
+    select d.dealer_permit_number, d.DEALER_NAME
+    from dealer_data d) loop
+    
+        dealer_object.put(DEALER_PERMIT, d_data.DEALER_PERMIT_NUMBER);
+        dealer_object.put(DEALER_NAME, d_data.DEALER_NAME);
+        /*
+        v_loop := v_loop + 1;
+        if v_loop > 500 then
+         exit;
+        end if;
+        */
+         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE('Dealer record:' || dealer_object.to_clob());
+         END IF;
+         
+        --Add object to array
+        dealer_array.append(dealer_object);
+        --START cleaning of JSON object. This is needed per key
+        dealer_object.remove(DEALER_PERMIT);
+        dealer_object.remove(DEALER_NAME);
+    end loop;
+    
+    v_result := dealer_array.to_clob();
+    v_result_length := length(v_result);
+    
+     IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+        DBMS_OUTPUT.PUT_LINE('Dealer JSON:');
+        WHILE v_result_length > 0
+        LOOP
+            DBMS_OUTPUT.PUT_LINE(substr(v_result, v_outputed_length, ITERATION_LENGTH));
+            v_outputed_length := v_outputed_length + ITERATION_LENGTH;
+            v_result_length := v_result_length - ITERATION_LENGTH;
+        END LOOP;
+     END IF;
+    
+    --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
+  EXCEPTION
+    WHEN OTHERS THEN
+        errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
+        
+        v_result := empty_array.to_clob();
+      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
+        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
+        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+  end;
+/****************************************************************************************************/
+ procedure dealer_jira_json (v_result OUT clob )
+  is
+        
+        vcronjob                       VARCHAR2(150)   := 'ON DEMAND';
+ 	    vbatchprocess                  VARCHAR2 (150)  := NULL;
+	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
+		vprocedurename                 VARCHAR2 (255)  := 'DEALER_JIRA_JSON';
+		vtablename                     VARCHAR2 (50)   := '';	    
+		ilogid                         INT             := 0;
+		VSQL                           varchar2 (4000);		
+        errmsg           VARCHAR2 (2000);
+        sql_stmt             VARCHAR2 (2000);
+        vowner           VARCHAR2 (50)   :='CFDRS';
+        ifsoseq          NUMBER          :=0;
+        v_compliance_start  date;
+        v_compliance_end    date;
+        v_name             VARCHAR2 (25);
+        v_debug  NUMBER;
+        v_loop  NUMBER := 0;
+        v_maxdate date;
+        v_result_length NUMBER := 0;
+        v_outputed_length NUMBER := 1;   -- Because first position of a string in PL/SQL is 1, not 0
+        
+        ITERATION_LENGTH CONSTANT NUMBER := 4000;
+        
+        DEALER_PERMIT CONSTANT VARCHAR2(20) := 'DEALER_PERMIT_NUMBER';
+        DEALER_NAME CONSTANT VARCHAR2(11) := 'DEALER_NAME';
+        DEALER_PERMIT_WITH_NAME CONSTANT VARCHAR2(23) := 'DEALER_PERMIT_WITH_NAME';
+      
+        dealer_object  JSON_OBJECT_T := json_object_t();
+        dealer_array  JSON_ARRAY_T := json_array_t();
+        empty_array  JSON_ARRAY_T := json_array_t();
+  begin
+    DBMS_OUTPUT.ENABLE(1000000);
+    
+    for d_data in (with dealer_data as (SELECT  DEALER_PERMIT_NUMBER,  
+                                                upper(DEALER_NAME) DEALER_NAME,
+                                                upper(DEALER_PERMIT_WITH_NAME) DEALER_PERMIT_WITH_NAME
+        FROM
+        (
+        SELECT dealer_permit_number
+                ,dealer_name
+                ,dealer_permit_with_name
+                FROM FSO_ADMIN.jira_fh2_dealer_list
+                ORDER BY dealer_permit_number ASC)  )
+    select d.dealer_permit_number, d.DEALER_NAME, d.DEALER_PERMIT_WITH_NAME
+    from dealer_data d) loop
+    
+        dealer_object.put(DEALER_PERMIT, d_data.DEALER_PERMIT_NUMBER);
+        dealer_object.put(DEALER_NAME, d_data.DEALER_NAME);
+        dealer_object.put(DEALER_PERMIT_WITH_NAME, d_data.DEALER_PERMIT_WITH_NAME);
+
+         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE('Dealer JIRA record:' || dealer_object.to_clob());
+         END IF;
+         
+        --Add object to array
+        dealer_array.append(dealer_object);
+        --START cleaning of JSON object. This is needed per key
+        dealer_object.remove(DEALER_PERMIT);
+        dealer_object.remove(DEALER_NAME);
+        dealer_object.remove(DEALER_PERMIT_WITH_NAME);
+    end loop;
+    
+    v_result := dealer_array.to_clob();
+    v_result_length := length(v_result);
+    
+     IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+        DBMS_OUTPUT.PUT_LINE('Dealer JIRA JSON:');
+        WHILE v_result_length > 0
+        LOOP
+            DBMS_OUTPUT.PUT_LINE(substr(v_result, v_outputed_length, ITERATION_LENGTH));
+            v_outputed_length := v_outputed_length + ITERATION_LENGTH;
+            v_result_length := v_result_length - ITERATION_LENGTH;
+        END LOOP;
+     END IF;
+    
+    --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
+  EXCEPTION
+    WHEN OTHERS THEN
+        errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
+        
+        v_result := empty_array.to_clob();
+      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
+        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
+        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+  end;
+/****************************************************************************************************/
+ procedure vessel_jira_json (v_result OUT clob )
+  is
+        
+        vcronjob                       VARCHAR2(150)   := 'ON DEMAND';
+ 	    vbatchprocess                  VARCHAR2 (150)  := NULL;
+	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
+		vprocedurename                 VARCHAR2 (255)  := 'VESSEL_JIRA_JSON';
+		vtablename                     VARCHAR2 (50)   := '';	    
+		ilogid                         INT             := 0;
+		VSQL                           varchar2 (4000);		
+        errmsg           VARCHAR2 (2000);
+        sql_stmt             VARCHAR2 (2000);
+        vowner           VARCHAR2 (50)   :='CFDRS';
+        ifsoseq          NUMBER          :=0;
+        v_compliance_start  date;
+        v_compliance_end    date;
+        v_name             VARCHAR2 (25);
+        v_debug  NUMBER;
+        v_loop  NUMBER := 0;
+        v_maxdate date;
+        v_result_length NUMBER := 0;
+        v_outputed_length NUMBER := 1;   -- Because first position of a string in PL/SQL is 1, not 0
+        
+        ITERATION_LENGTH CONSTANT NUMBER := 4000;
+        
+        VESSEL_PERMIT CONSTANT VARCHAR2(20) := 'VESSEL_PERMIT_NUMBER';
+        VESSEL_NAME CONSTANT VARCHAR2(11) := 'VESSEL_NAME';
+        VESSEL_PERMIT_WITH_NAME CONSTANT VARCHAR2(23) := 'VESSEL_PERMIT_WITH_NAME';
+      
+        vessel_object  JSON_OBJECT_T := json_object_t();
+        vessel_array  JSON_ARRAY_T := json_array_t();
+        empty_array  JSON_ARRAY_T := json_array_t();
+  begin
+    DBMS_OUTPUT.ENABLE(1000000);
+    
+    for v_data in (with vessel_data as (SELECT  VESSEL_PERMIT_NUMBER,  
+                                                upper(VESSEL_NAME) VESSEL_NAME,
+                                                upper(VESSEL_PERMIT_WITH_NAME) VESSEL_PERMIT_WITH_NAME
+        FROM
+        (
+        SELECT vessel_permit_number
+                ,vessel_name
+                ,vessel_permit_with_name
+                FROM FSO_ADMIN.jira_fh2_vessel_list
+                ORDER BY vessel_permit_number ASC)  )
+    select v.vessel_permit_number, v.VESSEL_NAME, v.VESSEL_PERMIT_WITH_NAME
+    from vessel_data v) loop
+    
+        vessel_object.put(VESSEL_PERMIT, v_data.VESSEL_PERMIT_NUMBER);
+        vessel_object.put(VESSEL_NAME, v_data.VESSEL_NAME);
+        vessel_object.put(VESSEL_PERMIT_WITH_NAME, v_data.VESSEL_PERMIT_WITH_NAME);
+
+         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE('Vessel JIRA record:' || vessel_object.to_clob());
+         END IF;
+         
+        --Add object to array
+        vessel_array.append(vessel_object);
+        --START cleaning of JSON object. This is needed per key
+        vessel_object.remove(VESSEL_PERMIT);
+        vessel_object.remove(VESSEL_NAME);
+        vessel_object.remove(VESSEL_PERMIT_WITH_NAME);
+    end loop;
+    
+    v_result := vessel_array.to_clob();
+    v_result_length := length(v_result);
+    
+     IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+        DBMS_OUTPUT.PUT_LINE('Vessel JIRA JSON:');
+        WHILE v_result_length > 0
+        LOOP
+            DBMS_OUTPUT.PUT_LINE(substr(v_result, v_outputed_length, ITERATION_LENGTH));
+            v_outputed_length := v_outputed_length + ITERATION_LENGTH;
+            v_result_length := v_result_length - ITERATION_LENGTH;
+        END LOOP;
+     END IF;
+    
+    --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
+  EXCEPTION
+    WHEN OTHERS THEN
+        errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
+        
+        v_result := empty_array.to_clob();
+      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
+        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
+        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+  end;
+/****************************************************************************************************/
+ procedure operator_json (v_input IN CLOB, v_result OUT clob )
+  is
+        
+        vcronjob                       VARCHAR2(150)   := 'ON DEMAND';
+ 	    vbatchprocess                  VARCHAR2 (150)  := NULL;
+	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
+		vprocedurename                 VARCHAR2 (255)  := 'OPERATOR_JSON';
+		vtablename                     VARCHAR2 (50)   := '';	    
+		ilogid                         INT             := 0;
+		VSQL                           varchar2 (4000);		
+        errmsg           VARCHAR2 (2000);
+        sql_stmt             VARCHAR2 (2000);
+        vowner           VARCHAR2 (50)   :='CFDRS';
+        ifsoseq          NUMBER          :=0;
+        v_compliance_start  date;
+        v_compliance_end    date;
+        v_name             VARCHAR2 (25);
+        v_debug  NUMBER;
+        v_loop  NUMBER := 0;
+        v_maxdate date;
+        v_result_length NUMBER := 0;
+        v_outputed_length NUMBER := 1;   -- Because first position of a string in PL/SQL is 1, not 0
+        
+        ITERATION_LENGTH CONSTANT NUMBER := 4000;
+        
+        OPERATOR_KEY CONSTANT VARCHAR2(12) := 'OPERATOR_KEY';
+        NAME_FIRST CONSTANT VARCHAR2(10) := 'NAME_FIRST';
+        NAME_MIDDLE CONSTANT VARCHAR2(11) := 'NAME_MIDDLE';
+        NAME_LAST CONSTANT VARCHAR2(9) := 'NAME_LAST';
+      
+        operator_object  JSON_OBJECT_T := json_object_t();
+        operator_array  JSON_ARRAY_T := json_array_t();
+        empty_array  JSON_ARRAY_T := json_array_t();
+  begin
+    DBMS_OUTPUT.ENABLE(1000000);
+    
+    for o_data in (with operator_data as (SELECT  OPERATOR_KEY,  
+                                                upper(NAME_FIRST) NAME_FIRST,
+                                                upper(NAME_MIDDLE) NAME_MIDDLE,
+                                                upper(NAME_LAST) NAME_LAST
+        FROM
+        (
+        SELECT DISTINCT jo.operator_key
+            ,jo.name_first
+            ,jo.name_middle
+            ,jo.name_last
+            FROM jops.op_permit_date t1
+            ,jops.operator jo
+            WHERE t1.operator_key = jo.operator_key
+            AND (t1.date_expired IS NULL OR t1.date_expired > sysdate - 365)
+            AND (t1.date_cancelled IS NULL OR t1.date_cancelled > sysdate - 365)
+            ORDER BY jo.operator_key ASC)  )
+    select o.operator_key, o.name_first, o.name_middle, o.name_last
+    from operator_data o) loop
+    
+        operator_object.put(OPERATOR_KEY, o_data.OPERATOR_KEY);
+        operator_object.put(NAME_FIRST, o_data.NAME_FIRST);
+        operator_object.put(NAME_MIDDLE, o_data.NAME_MIDDLE);
+        operator_object.put(NAME_LAST, o_data.NAME_LAST);
+
+         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE('Operator record:' || operator_object.to_clob());
+         END IF;
+         
+        --Add object to array
+        operator_array.append(operator_object);
+        --START cleaning of JSON object. This is needed per key
+        operator_object.remove(OPERATOR_KEY);
+        operator_object.remove(NAME_FIRST);
+        operator_object.remove(NAME_MIDDLE);
+        operator_object.remove(NAME_LAST);
+    end loop;
+    
+    v_result := operator_array.to_clob();
+    v_result_length := length(v_result);
+    
+     IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+        DBMS_OUTPUT.PUT_LINE('Operator JSON:');
         WHILE v_result_length > 0
         LOOP
             DBMS_OUTPUT.PUT_LINE(substr(v_result, v_outputed_length, ITERATION_LENGTH));

@@ -14,6 +14,9 @@ create or replace package PKG_JSON IS
     --SET debug level to check what is happening
     PROCEDURE SET_SESSION_DEBUG_LEVEL( asi_DebugLevel  IN SMALLINT );
 
+	--Validate the input JSON if appropriate
+    PROCEDURE validate_input (v_input IN VARCHAR2, v_result OUT NUMBER, v_timestamp OUT NUMBER);
+	
     -- MAIN procedure for generating chart area JSON via NOAA schema lookup
     PROCEDURE chart_area_json (v_result OUT CLOB );
     
@@ -43,12 +46,9 @@ create or replace PACKAGE BODY PKG_JSON AS
     isi_CurrentDebugLevel SMALLINT := OFF_DEBUG_LEVEL;
 
     PROCEDURE SET_SESSION_DEBUG_LEVEL( asi_DebugLevel  IN SMALLINT )
-    IS
-    
+    IS 
         lExcpt_InvalidLoggingLevel EXCEPTION;
-    
         ls_MethodName              VARCHAR2(128);
-    
     BEGIN
     
         ls_MethodName := 'SET_SESSION_DEBUG_LEVEL';
@@ -61,16 +61,81 @@ create or replace PACKAGE BODY PKG_JSON AS
              ( asi_DebugLevel != VERBOSE_DEBUG_LEVEL ) ) Then
     
             RAISE lExcpt_InvalidLoggingLevel;
-    
         Else
-    
             isi_CurrentDebugLevel := asi_DebugLevel;
-    
         End If;
-    
     
     END SET_SESSION_DEBUG_LEVEL;
 /****************************************************************************************************/    
+PROCEDURE validate_input (v_input IN VARCHAR2, v_result OUT NUMBER, v_timestamp OUT NUMBER)
+/*      v_input       -- CLOB typecast to VARCHAR2, presumably a short JSON file
+        v_result      -- 1: full, 2: incremental, 0: invalid
+        v_timestamp   -- Must be a 10 digit number  */
+   IS
+    ja JSON_ARRAY_T;
+    jo JSON_OBJECT_T;
+    je JSON_ELEMENT_T;
+    keys        JSON_KEY_LIST;
+    keys_string VARCHAR2(100);
+    v_filetype VARCHAR2(100);
+    v_timestring VARCHAR2(10);
+
+begin
+  v_result := 0;
+  v_timestamp := 0;
+  ja := new JSON_ARRAY_T;
+  je :=  JSON_ELEMENT_T.parse(lower(v_input));  /* JSON operations are case-sensitive */
+  
+  IF (je.is_Object) THEN
+      jo := treat(je AS JSON_OBJECT_T);
+      keys := jo.get_keys;
+      IF (keys.count < 1) THEN
+        DBMS_OUTPUT.put_line('Empty JSON');
+        return;
+      END IF;
+
+      IF (keys(1) = 'filetype') THEN
+        v_filetype := jo.get_string('filetype');
+        DBMS_OUTPUT.put_line(v_filetype);
+      ELSE
+        DBMS_OUTPUT.put_line('First JSON element is not "filetype"');
+        return;
+      END IF;
+      
+      IF (v_filetype = 'full') THEN     /* First JSON element must be either */
+        v_result := 1;                  /* "filetype":"full" or "filetype":"incremental" */
+        return;
+      ELSIF (v_filetype <> 'incremental') THEN
+        DBMS_OUTPUT.put_line('Invalid filetype');
+        return;
+      END IF;
+      
+      IF (keys.count < 2) THEN      /* We get this far only with "filetype":"incremental" */
+        DBMS_OUTPUT.put_line('Timestamp not specified');
+        return;
+      END IF;
+      
+      IF (keys(2) = 'timestamp') THEN
+        v_timestring := substr(jo.get_string('timestamp'),1,10);
+        DBMS_OUTPUT.put_line(v_timestring);
+      ELSE
+        DBMS_OUTPUT.put_line('Second JSON element is not "timestamp"');
+        return;
+      END IF;
+      
+      IF (length(v_timestring) < 10 OR VALIDATE_CONVERSION(v_timestring AS NUMBER) = 0) THEN
+        DBMS_OUTPUT.put_line('Not a valid timestamp');
+        return;
+      END IF;
+      
+      v_result := 2;
+      v_timestamp := TO_NUMBER(v_timestring);
+  ELSE
+    v_result := 0;
+    DBMS_OUTPUT.put_line('Not a JSON');
+  END IF;
+END ;
+/****************************************************************************************************/   
  procedure chart_area_json (v_result OUT clob )
   is
 

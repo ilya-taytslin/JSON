@@ -13,10 +13,10 @@ create or replace package PKG_JSON IS
     
     --SET debug level to check what is happening
     PROCEDURE SET_SESSION_DEBUG_LEVEL( asi_DebugLevel  IN SMALLINT );
+    
+    --Validate the input JSON if appropriate
+    PROCEDURE validate_input (v_input IN VARCHAR2, v_filecode OUT NUMBER, v_timestamp OUT NUMBER);
 
-	--Validate the input JSON if appropriate
-    PROCEDURE validate_input (v_input IN VARCHAR2, v_result OUT NUMBER, v_timestamp OUT NUMBER);
-	
     -- MAIN procedure for generating chart area JSON via NOAA schema lookup
     PROCEDURE chart_area_json (v_result OUT CLOB );
     
@@ -66,11 +66,11 @@ create or replace PACKAGE BODY PKG_JSON AS
         End If;
     
     END SET_SESSION_DEBUG_LEVEL;
-/****************************************************************************************************/    
-PROCEDURE validate_input (v_input IN VARCHAR2, v_result OUT NUMBER, v_timestamp OUT NUMBER)
-/*      v_input       -- CLOB typecast to VARCHAR2, presumably a short JSON file
-        v_result      -- 1: full, 2: incremental, 0: invalid
-        v_timestamp   -- Must be a 10 digit number  */
+/****************************************************************************************************/   
+PROCEDURE validate_input (v_input IN VARCHAR2, v_filecode OUT NUMBER, v_timestamp OUT NUMBER)
+      --  v_input       CLOB typecast to VARCHAR2, presumably a short JSON file
+      --  v_filecode    1: full, 2: incremental, 0: invalid
+      --  v_timestamp   Must be a 10 digit number  
    IS
     ja JSON_ARRAY_T;
     jo JSON_OBJECT_T;
@@ -81,10 +81,15 @@ PROCEDURE validate_input (v_input IN VARCHAR2, v_result OUT NUMBER, v_timestamp 
     v_timestring VARCHAR2(10);
 
 begin
-  v_result := 0;
+  v_filecode := 0;
   v_timestamp := 0;
   ja := new JSON_ARRAY_T;
-  je :=  JSON_ELEMENT_T.parse(lower(v_input));  /* JSON operations are case-sensitive */
+  IF (v_input is json (STRICT)) THEN
+    je :=  JSON_ELEMENT_T.parse(lower(v_input));  /* JSON operations are case-sensitive */
+  ELSE
+    DBMS_OUTPUT.put_line('Not a JSON string');
+        return;
+  END IF;
   
   IF (je.is_Object) THEN
       jo := treat(je AS JSON_OBJECT_T);
@@ -102,15 +107,15 @@ begin
         return;
       END IF;
       
-      IF (v_filetype = 'full') THEN     /* First JSON element must be either */
-        v_result := 1;                  /* "filetype":"full" or "filetype":"incremental" */
+      IF (v_filetype = 'full') THEN     -- First JSON element must be either 
+        v_filecode := 1;                  -- "filetype":"full" or "filetype":"incremental" 
         return;
       ELSIF (v_filetype <> 'incremental') THEN
         DBMS_OUTPUT.put_line('Invalid filetype');
         return;
       END IF;
       
-      IF (keys.count < 2) THEN      /* We get this far only with "filetype":"incremental" */
+      IF (keys.count < 2) THEN      -- We get this far only with "filetype":"incremental" 
         DBMS_OUTPUT.put_line('Timestamp not specified');
         return;
       END IF;
@@ -128,10 +133,10 @@ begin
         return;
       END IF;
       
-      v_result := 2;
+      v_filecode := 2;
       v_timestamp := TO_NUMBER(v_timestring);
   ELSE
-    v_result := 0;
+    v_filecode := 0;
     DBMS_OUTPUT.put_line('Not a JSON');
   END IF;
 END ;
@@ -452,7 +457,7 @@ END ;
         DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
   end;
 /****************************************************************************************************/
- procedure dealer_json (v_input IN CLOB, v_result OUT clob )
+procedure dealer_json (v_input IN CLOB, v_result OUT clob )
   is
         
         vcronjob                       VARCHAR2(150)   := 'ON DEMAND';
@@ -474,6 +479,9 @@ END ;
         v_maxdate date;
         v_result_length NUMBER := 0;
         v_outputed_length NUMBER := 1;   -- Because first position of a string in PL/SQL is 1, not 0
+        v_timestamp NUMBER := 0;
+        v_filecode NUMBER := 0;
+        v_char_input VARCHAR2(100) := '';
         
         ITERATION_LENGTH CONSTANT NUMBER := 4000;
         
@@ -485,57 +493,65 @@ END ;
         empty_array  JSON_ARRAY_T := json_array_t();
   begin
     DBMS_OUTPUT.ENABLE(1000000);
+    v_char_input := substr(NVL(v_input,'{}'),1,100);
+    --v_char_input := substr(v_input,1,100);
+    validate_input (v_char_input , v_filecode , v_timestamp);
     
-    for d_data in (with dealer_data as (SELECT  DEALER_PERMIT_NUMBER,  upper(DEALER_NAME) DEALER_NAME
-        FROM
-        (
-        SELECT dnum DEALER_PERMIT_NUMBER, dlr DEALER_NAME
+    IF (v_filecode = 0) THEN
+        v_result := '{}';  -- Return empty JSON if something goes wrong
+        return;
+    ELSIF (v_filecode = 1) THEN
+        for d_data in (with dealer_data as (SELECT  DEALER_PERMIT_NUMBER,  upper(DEALER_NAME) DEALER_NAME
             FROM
             (
-            SELECT d.dnum, d.dlr, d.CITY, d.ST, row_number()
-            OVER (PARTITION BY d.dnum ORDER BY d.year desc) r
-            FROM PERMIT.DEALER d
-            WHERE d.year >= (EXTRACT(YEAR from SYSDATE) - 5)
-            AND d.dlr is not null
-            )
-            WHERE r = 1
-            UNION
-            SELECT 1 as dealer_permit_number,'Seized for Violations' as DEALER_NAME FROM dual
-            UNION
-            SELECT 2 as dealer_permit_number,'Sold or Retained as Bait' as DEALER_NAME FROM dual
-            UNION
-            SELECT 4 as dealer_permit_number,'Retained for Future Sale' as DEALER_NAME FROM dual
-            UNION
-            SELECT 5 as dealer_permit_number,'Sold to Non-Federal Dealer' as DEALER_NAME FROM dual
-            UNION
-            SELECT 6 as dealer_permit_number,'Sub Legal Catch Landed for Research' as DEALER_NAME FROM dual
-            UNION
-            SELECT 7 as dealer_permit_number,'Legal Catch Landed for Research (EFP Trips Only)' as DEALER_NAME FROM dual
-            UNION
-            SELECT 8 as dealer_permit_number,'Landed Unmarketable Catch (LUMF)' as DEALER_NAME FROM dual
-            UNION
-            SELECT 99998 as dealer_permit_number,'Home Consumption' as DEALER_NAME FROM dual)  )
-    select d.dealer_permit_number, d.DEALER_NAME
-    from dealer_data d) loop
-    
-        dealer_object.put(DEALER_PERMIT, d_data.DEALER_PERMIT_NUMBER);
-        dealer_object.put(DEALER_NAME, d_data.DEALER_NAME);
-        /*
-        v_loop := v_loop + 1;
-        if v_loop > 500 then
-         exit;
-        end if;
-        */
-         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
-            DBMS_OUTPUT.PUT_LINE('Dealer record:' || dealer_object.to_clob());
-         END IF;
-         
-        --Add object to array
-        dealer_array.append(dealer_object);
-        --START cleaning of JSON object. This is needed per key
-        dealer_object.remove(DEALER_PERMIT);
-        dealer_object.remove(DEALER_NAME);
-    end loop;
+            SELECT dnum DEALER_PERMIT_NUMBER, dlr DEALER_NAME
+                FROM
+                (
+                SELECT d.dnum, d.dlr, d.CITY, d.ST, row_number()
+                OVER (PARTITION BY d.dnum ORDER BY d.year desc) r
+                FROM PERMIT.DEALER d
+                WHERE d.year >= (EXTRACT(YEAR from SYSDATE) - 5)
+                AND d.dlr is not null
+                )
+                WHERE r = 1
+                UNION
+                SELECT 1 as dealer_permit_number,'Seized for Violations' as DEALER_NAME FROM dual
+                UNION
+                SELECT 2 as dealer_permit_number,'Sold or Retained as Bait' as DEALER_NAME FROM dual
+                UNION
+                SELECT 4 as dealer_permit_number,'Retained for Future Sale' as DEALER_NAME FROM dual
+                UNION
+                SELECT 5 as dealer_permit_number,'Sold to Non-Federal Dealer' as DEALER_NAME FROM dual
+                UNION
+                SELECT 6 as dealer_permit_number,'Sub Legal Catch Landed for Research' as DEALER_NAME FROM dual
+                UNION
+                SELECT 7 as dealer_permit_number,'Legal Catch Landed for Research (EFP Trips Only)' as DEALER_NAME FROM dual
+                UNION
+                SELECT 8 as dealer_permit_number,'Landed Unmarketable Catch (LUMF)' as DEALER_NAME FROM dual
+                UNION
+                SELECT 99998 as dealer_permit_number,'Home Consumption' as DEALER_NAME FROM dual)  )
+        select d.dealer_permit_number, d.DEALER_NAME
+        from dealer_data d) loop
+        
+            dealer_object.put(DEALER_PERMIT, d_data.DEALER_PERMIT_NUMBER);
+            dealer_object.put(DEALER_NAME, d_data.DEALER_NAME);
+            /*
+            v_loop := v_loop + 1;
+            if v_loop > 500 then
+             exit;
+            end if;
+            */
+             IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+                DBMS_OUTPUT.PUT_LINE('Dealer record:' || dealer_object.to_clob());
+             END IF;
+             
+            --Add object to array
+            dealer_array.append(dealer_object);
+            --START cleaning of JSON object. This is needed per key
+            dealer_object.remove(DEALER_PERMIT);
+            dealer_object.remove(DEALER_NAME);
+        end loop;
+    END IF;
     
     v_result := dealer_array.to_clob();
     v_result_length := length(v_result);

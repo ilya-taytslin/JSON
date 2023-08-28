@@ -38,6 +38,12 @@ create or replace package PKG_JSON IS
     -- MAIN procedure for generating operator JSON 
     PROCEDURE operator_json (v_input IN CLOB, v_result OUT CLOB );
     
+    -- MAIN procedure for generating permit JSON 
+    PROCEDURE permit_json (v_input IN CLOB, v_result OUT CLOB );
+    
+    -- MAIN procedure for generating ports API JSON 
+    --PROCEDURE ports_api_json (v_result OUT CLOB );
+    
 END PKG_JSON;
 /********************************************************************************/
 
@@ -494,7 +500,6 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
   begin
     DBMS_OUTPUT.ENABLE(1000000);
     v_char_input := substr(NVL(v_input,'{}'),1,100);
-    --v_char_input := substr(v_input,1,100);
     validate_input (v_char_input , v_filecode , v_timestamp);
     
     IF (v_filecode = 0) THEN
@@ -535,12 +540,49 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         
             dealer_object.put(DEALER_PERMIT, d_data.DEALER_PERMIT_NUMBER);
             dealer_object.put(DEALER_NAME, d_data.DEALER_NAME);
-            /*
-            v_loop := v_loop + 1;
-            if v_loop > 500 then
-             exit;
-            end if;
-            */
+
+             IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+                DBMS_OUTPUT.PUT_LINE('Dealer record:' || dealer_object.to_clob());
+             END IF;
+             
+            --Add object to array
+            dealer_array.append(dealer_object);
+            --START cleaning of JSON object. This is needed per key
+            dealer_object.remove(DEALER_PERMIT);
+            dealer_object.remove(DEALER_NAME);
+        end loop;
+    ELSE
+        for d_data in (with dealer_data as (SELECT  DEALER_PERMIT_NUMBER,  upper(DEALER_NAME) DEALER_NAME
+            FROM
+            (
+            SELECT DISTINCT d.dnum dealer_permit_number
+                , upper(d.dlr) dealer_name
+                FROM permit.dealer d
+                WHERE (d.doc IS NULL
+                OR d.doc > sysdate - 365)
+                AND d.dlr is not null
+                AND d.year = (SELECT max(d1.year)
+                FROM permit.dealer d1
+                WHERE d1.dnum = d.dnum)
+                AND d.dnum NOT IN (SELECT DISTINCT d2.dnum dealer_permit_number
+                from permit.dealer d2
+                WHERE (d2.doc is null
+                OR d2.doc > sysdate - 365)
+                AND d2.year = (SELECT max(d3.year)
+                FROM permit.dealer d3
+                WHERE d3.dnum = d.dnum)
+                AND d2.de <= (SELECT t
+                FROM (
+                SELECT timestamp '1970-01-01 00:00:00' + (v_timestamp / 86400) - (5/24) t
+                FROM dual)) - 150
+                )
+                ORDER BY dealer_permit_number ASC)  )
+        select d.dealer_permit_number, d.DEALER_NAME
+        from dealer_data d) loop
+        
+            dealer_object.put(DEALER_PERMIT, d_data.DEALER_PERMIT_NUMBER);
+            dealer_object.put(DEALER_NAME, d_data.DEALER_NAME);
+    
              IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
                 DBMS_OUTPUT.PUT_LINE('Dealer record:' || dealer_object.to_clob());
              END IF;
@@ -775,6 +817,9 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         v_maxdate date;
         v_result_length NUMBER := 0;
         v_outputed_length NUMBER := 1;   -- Because first position of a string in PL/SQL is 1, not 0
+        v_timestamp NUMBER := 0;
+        v_filecode NUMBER := 0;
+        v_char_input VARCHAR2(100) := '';
         
         ITERATION_LENGTH CONSTANT NUMBER := 4000;
         
@@ -788,43 +833,93 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         empty_array  JSON_ARRAY_T := json_array_t();
   begin
     DBMS_OUTPUT.ENABLE(1000000);
+    v_char_input := substr(NVL(v_input,'{}'),1,100);
+    validate_input (v_char_input , v_filecode , v_timestamp);
     
-    for o_data in (with operator_data as (SELECT  OPERATOR_KEY,  
+    IF (v_filecode = 0) THEN
+        v_result := '{}';  -- Return empty JSON if something goes wrong
+        return;
+    ELSIF (v_filecode = 1) THEN
+        for o_data in (with operator_data as (SELECT  OPERATOR_KEY,  
                                                 upper(NAME_FIRST) NAME_FIRST,
                                                 upper(NAME_MIDDLE) NAME_MIDDLE,
                                                 upper(NAME_LAST) NAME_LAST
-        FROM
-        (
-        SELECT DISTINCT jo.operator_key
-            ,jo.name_first
-            ,jo.name_middle
-            ,jo.name_last
-            FROM jops.op_permit_date t1
-            ,jops.operator jo
-            WHERE t1.operator_key = jo.operator_key
-            AND (t1.date_expired IS NULL OR t1.date_expired > sysdate - 365)
-            AND (t1.date_cancelled IS NULL OR t1.date_cancelled > sysdate - 365)
-            ORDER BY jo.operator_key ASC)  )
-    select o.operator_key, o.name_first, o.name_middle, o.name_last
-    from operator_data o) loop
-    
-        operator_object.put(OPERATOR_KEY, o_data.OPERATOR_KEY);
-        operator_object.put(NAME_FIRST, o_data.NAME_FIRST);
-        operator_object.put(NAME_MIDDLE, o_data.NAME_MIDDLE);
-        operator_object.put(NAME_LAST, o_data.NAME_LAST);
+            FROM
+            (
+            SELECT DISTINCT jo.operator_key
+                ,jo.name_first
+                ,jo.name_middle
+                ,jo.name_last
+                FROM jops.op_permit_date t1
+                ,jops.operator jo
+                WHERE t1.operator_key = jo.operator_key
+                AND (t1.date_expired IS NULL OR t1.date_expired > sysdate - 365)
+                AND (t1.date_cancelled IS NULL OR t1.date_cancelled > sysdate - 365)
+                ORDER BY jo.operator_key ASC)  )
+        select o.operator_key, o.name_first, o.name_middle, o.name_last
+        from operator_data o) loop
+        
+            operator_object.put(OPERATOR_KEY, o_data.OPERATOR_KEY);
+            operator_object.put(NAME_FIRST, o_data.NAME_FIRST);
+            operator_object.put(NAME_MIDDLE, o_data.NAME_MIDDLE);
+            operator_object.put(NAME_LAST, o_data.NAME_LAST);
 
-         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
-            DBMS_OUTPUT.PUT_LINE('Operator record:' || operator_object.to_clob());
-         END IF;
-         
-        --Add object to array
-        operator_array.append(operator_object);
-        --START cleaning of JSON object. This is needed per key
-        operator_object.remove(OPERATOR_KEY);
-        operator_object.remove(NAME_FIRST);
-        operator_object.remove(NAME_MIDDLE);
-        operator_object.remove(NAME_LAST);
-    end loop;
+             IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+                DBMS_OUTPUT.PUT_LINE('Dealer record:' || operator_object.to_clob());
+             END IF;
+             
+            --Add object to array
+            operator_array.append(operator_object);
+            --START cleaning of JSON object. This is needed per key
+            operator_object.remove(OPERATOR_KEY);
+            operator_object.remove(NAME_FIRST);
+            operator_object.remove(NAME_MIDDLE);
+            operator_object.remove(NAME_LAST);
+        end loop;
+    ELSE
+        for o_data in (with basetime as (select timestamp '1970-01-01 00:00:00' + (v_timestamp / 86400) - (5/24) t from dual)
+            , baseline as
+                (SELECT distinct o.operator_key
+                ,o.name_first
+                ,o.name_middle
+                ,o.name_last
+                FROM jops.op_permit_date t1
+                ,jops.operator o
+                WHERE t1.operator_key = o.operator_key
+                AND (t1.date_expired is null OR t1.date_expired > sysdate - 365)
+                AND (t1.date_cancelled is null OR t1.date_cancelled > sysdate - 365)
+                AND t1.de <= (SELECT bt.t FROM basetime bt)
+                )
+            SELECT DISTINCT o.operator_key
+            ,o.name_first
+            ,o.name_middle
+            ,o.name_last
+            FROM jops.op_permit_date t1
+            ,jops.operator o
+            WHERE t1.operator_key = o.operator_key
+            AND (t1.date_expired is null OR t1.date_expired > sysdate - 365)
+            AND (t1.date_cancelled is null OR t1.date_cancelled > sysdate - 365)
+            AND o.operator_key NOT IN (SELECT b.operator_key FROM baseline b)
+            ORDER BY operator_key ASC) loop
+        
+            operator_object.put(OPERATOR_KEY, o_data.OPERATOR_KEY);
+            operator_object.put(NAME_FIRST, o_data.NAME_FIRST);
+            operator_object.put(NAME_MIDDLE, o_data.NAME_MIDDLE);
+            operator_object.put(NAME_LAST, o_data.NAME_LAST);
+
+             IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+                DBMS_OUTPUT.PUT_LINE('Dealer record:' || operator_object.to_clob());
+             END IF;
+             
+            --Add object to array
+            operator_array.append(operator_object);
+            --START cleaning of JSON object. This is needed per key
+            operator_object.remove(OPERATOR_KEY);
+            operator_object.remove(NAME_FIRST);
+            operator_object.remove(NAME_MIDDLE);
+            operator_object.remove(NAME_LAST);
+        end loop;
+    END IF;
     
     v_result := operator_array.to_clob();
     v_result_length := length(v_result);
@@ -840,6 +935,215 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
      END IF;
     
     --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
+  EXCEPTION
+    WHEN OTHERS THEN
+        errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
+        
+        v_result := empty_array.to_clob();
+      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
+        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
+        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+  end;
+/****************************************************************************************************/
+procedure permit_json (v_input IN CLOB, v_result OUT clob )
+  is
+        
+        vcronjob                       VARCHAR2(150)   := 'ON DEMAND';
+ 	    vbatchprocess                  VARCHAR2 (150)  := NULL;
+	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
+		vprocedurename                 VARCHAR2 (255)  := 'PERMIT_JSON';
+		vtablename                     VARCHAR2 (50)   := '';	    
+		ilogid                         INT             := 0;
+		VSQL                           varchar2 (4000);		
+        errmsg           VARCHAR2 (2000);
+        sql_stmt             VARCHAR2 (2000);
+        vowner           VARCHAR2 (50)   :='CFDRS';
+        ifsoseq          NUMBER          :=0;
+        v_compliance_start  date;
+        v_compliance_end    date;
+        v_name             VARCHAR2 (25);
+        v_debug  NUMBER;
+        v_loop  NUMBER := 0;
+        v_maxdate date;
+        v_result_length NUMBER := 0;
+        v_outputed_length NUMBER := 1;   -- Because first position of a string in PL/SQL is 1, not 0
+        v_timestamp NUMBER := 0;
+        v_filecode NUMBER := 0;
+        v_char_input VARCHAR2(100) := '';
+        
+        ITERATION_LENGTH CONSTANT NUMBER := 4000;
+        
+        PNUM CONSTANT VARCHAR2(4) := 'PNUM';
+        VES_NAME CONSTANT VARCHAR2(8) := 'VES_NAME';
+        HULL_ID CONSTANT VARCHAR2(7) := 'HULL_ID';
+      
+        permit_object  JSON_OBJECT_T := json_object_t();
+        permit_array  JSON_ARRAY_T := json_array_t();
+        empty_array  JSON_ARRAY_T := json_array_t();
+  begin
+    DBMS_OUTPUT.ENABLE(1000000);
+    v_char_input := substr(NVL(v_input,'{}'),1,100);
+    validate_input (v_char_input , v_filecode , v_timestamp);
+    
+    IF (v_filecode = 0) THEN
+        v_result := '{}';  -- Return empty JSON if something goes wrong
+        return;
+    ELSIF (v_filecode = 1) THEN
+        for p_data in (with permit_data as (SELECT PNUM, upper(VES_NAME) VES_NAME, HULL_ID
+            FROM
+            (
+            SELECT vv.vp_num pnum
+                ,vv.ves_name
+                ,vv.hull_id
+                FROM permit.vps_vessel vv
+                WHERE vv.ap_num = (SELECT MAX(vv1.ap_num)
+                FROM permit.vps_vessel vv1
+                WHERE vv.vp_num = vv1.vp_num)
+                AND vv.ap_year >= to_char(sysdate, 'YYYY')-1
+                UNION
+                SELECT 555555 as pnum, 'Sustainable Catch' as ves_name, 'TEST1111' as hull_id
+                FROM dual
+                ORDER BY pnum ASC)  )
+        select p.pnum, p.ves_name, p.hull_id
+        from permit_data p) loop
+        
+            permit_object.put(PNUM, p_data.PNUM);
+            permit_object.put(VES_NAME, p_data.VES_NAME);
+            permit_object.put(HULL_ID, p_data.HULL_ID);
+
+             IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+                DBMS_OUTPUT.PUT_LINE('Permit record:' || permit_object.to_clob());
+             END IF;
+             
+            --Add object to array
+            permit_array.append(permit_object);
+            --START cleaning of JSON object. This is needed per key
+            permit_object.remove(PNUM);
+            permit_object.remove(VES_NAME);
+            permit_object.remove(HULL_ID);
+        end loop;  
+    ELSE
+        for p_data in (with basetime as (select timestamp '1970-01-01 00:00:00' + (v_timestamp / 86400) - (5/24) t from dual)
+            , baseline as
+            (select distinct vv.vp_num pnum
+            ,vv.ves_name
+            ,vv.hull_id
+            from permit.vps_vessel vv
+            where 1 = 1
+            AND vv.ap_year >= to_char((SELECT bt1.t FROM basetime bt1), 'YYYY')-1
+            AND vv.de <= (SELECT bt3.t FROM basetime bt3)
+            )
+        SELECT distinct vv2.vp_num pnum
+        ,vv2.ves_name
+        ,vv2.hull_id
+        FROM permit.vps_vessel vv2
+        WHERE vv2.ap_year >= to_char((select bt.t from basetime bt), 'YYYY')-1
+        AND vv2.vp_num||vv2.ves_name||vv2.hull_id not in (select b.pnum||b.ves_name||b.hull_id from baseline b)
+        --Temporary to only get the latest registration
+        and vv2.ap_num in (select max(vv1.ap_num)
+        from permit.vps_vessel vv1
+        where vv2.vp_num = vv1.vp_num
+        )
+        --END temporary to get latest registration
+        UNION
+        SELECT 555555 as pnum, 'Sustainable Catch' as ves_name, 'TEST1111' as hull_id
+        FROM dual
+        ORDER BY 1 ASC) loop
+        
+            permit_object.put(PNUM, p_data.PNUM);
+            permit_object.put(VES_NAME, p_data.VES_NAME);
+            permit_object.put(HULL_ID, p_data.HULL_ID);
+
+             IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+                DBMS_OUTPUT.PUT_LINE('Permit record:' || permit_object.to_clob());
+             END IF;
+             
+            --Add object to array
+            permit_array.append(permit_object);
+            --START cleaning of JSON object. This is needed per key
+            permit_object.remove(PNUM);
+            permit_object.remove(VES_NAME);
+            permit_object.remove(HULL_ID);
+        end loop;  
+    END IF;
+    
+    v_result := permit_array.to_clob();
+    v_result_length := length(v_result);
+    
+     IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+        DBMS_OUTPUT.PUT_LINE('Permit JSON:');
+        WHILE v_result_length > 0
+        LOOP
+            DBMS_OUTPUT.PUT_LINE(substr(v_result, v_outputed_length, ITERATION_LENGTH));
+            v_outputed_length := v_outputed_length + ITERATION_LENGTH;
+            v_result_length := v_result_length - ITERATION_LENGTH;
+        END LOOP;
+     END IF;
+    
+    --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
+  EXCEPTION
+    WHEN OTHERS THEN
+        errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
+        
+        v_result := empty_array.to_clob();
+      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
+        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
+        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+  end;
+/****************************************************************************************************  
+ procedure ports_api_json (v_result OUT clob )
+  is
+
+   AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
+  vcronjob                           VARCHAR2(150)  := 'ON DEMAND';
+ 	    vbatchprocess                  VARCHAR2 (150)  := NULL;
+	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
+		vprocedurename                 VARCHAR2 (255)  := 'PORTS_API_JSON';
+		vtablename                     VARCHAR2 (50)   := '';	    
+		ilogid                         INT             := 0;
+		VSQL                           varchar2 (4000);		
+        errmsg           VARCHAR2 (2000);
+        sql_stmt             VARCHAR2 (2000);
+        vowner           VARCHAR2 (50)   :='CFDRS';
+        ifsoseq          NUMBER          :=0;
+        v_compliance_start  date;
+        v_compliance_end    date;
+        v_name             VARCHAR2 (25);
+        v_debug  NUMBER;
+        v_loop  NUMBER;
+        v_maxdate date;
+        
+        port_object  JSON_OBJECT_T := json_object_t();
+        port_array  JSON_ARRAY_T := json_array_t();
+        empty_array  JSON_ARRAY_T := json_array_t();
+  begin
+    DBMS_OUTPUT.ENABLE(1000000);
+    
+    for a_data in (with area_data as (select distinct nemarea as area_code
+        FROM noaa.loc2areas
+        WHERE NOT REGEXP_LIKE (nemarea, '[0][0-4][0-9]$|[0][5][0]$')
+        ORDER BY nemarea ASC)
+    select a.area_code
+    from area_data a) loop
+    
+        area_object.put(AREA_CODE, a_data.area_code);
+        
+         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE('Area code:' || area_object.to_clob());
+         END IF;
+    
+        area_array.append(area_object);
+        --Start cleaning JSON object
+        area_object.remove(AREA_CODE);
+    end loop;
+    
+     IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+        DBMS_OUTPUT.PUT_LINE('Area JSON:' || area_array.to_clob());
+     END IF;
+    
+    v_result := area_array.to_clob();
+
+  --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
   EXCEPTION
     WHEN OTHERS THEN
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;

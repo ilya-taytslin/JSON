@@ -42,7 +42,10 @@ create or replace package PKG_JSON IS
     PROCEDURE permit_json (v_input IN CLOB, v_result OUT CLOB );
     
     -- MAIN procedure for generating ports API JSON 
-    --PROCEDURE ports_api_json (v_result OUT CLOB );
+    PROCEDURE ports_api_json (v_result OUT CLOB );
+    
+    -- MAIN procedure for generating species JSON with exceptions
+    PROCEDURE species_json (v_result OUT CLOB );
     
 END PKG_JSON;
 /********************************************************************************/
@@ -1090,7 +1093,7 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
         --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
         DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
   end;
-/****************************************************************************************************  
+/****************************************************************************************************/
  procedure ports_api_json (v_result OUT clob )
   is
 
@@ -1113,35 +1116,126 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
         v_loop  NUMBER;
         v_maxdate date;
         
+        ID CONSTANT VARCHAR2(2) := 'ID';
+        
         port_object  JSON_OBJECT_T := json_object_t();
         port_array  JSON_ARRAY_T := json_array_t();
         empty_array  JSON_ARRAY_T := json_array_t();
   begin
     DBMS_OUTPUT.ENABLE(1000000);
     
-    for a_data in (with area_data as (select distinct nemarea as area_code
-        FROM noaa.loc2areas
-        WHERE NOT REGEXP_LIKE (nemarea, '[0][0-4][0-9]$|[0][5][0]$')
-        ORDER BY nemarea ASC)
-    select a.area_code
-    from area_data a) loop
+    for p_data in (with port_data as (select port id FROM vtr.port_merge)
+    select p.id
+    from port_data p) loop
     
-        area_object.put(AREA_CODE, a_data.area_code);
+        port_object.put(ID, p_data.id);
         
          IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
-            DBMS_OUTPUT.PUT_LINE('Area code:' || area_object.to_clob());
+            DBMS_OUTPUT.PUT_LINE('Port code:' || port_object.to_clob());
          END IF;
     
-        area_array.append(area_object);
+        port_array.append(port_object);
         --Start cleaning JSON object
-        area_object.remove(AREA_CODE);
+        port_object.remove(ID);
     end loop;
     
      IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
-        DBMS_OUTPUT.PUT_LINE('Area JSON:' || area_array.to_clob());
+        DBMS_OUTPUT.PUT_LINE('Port JSON:' || port_array.to_clob());
      END IF;
     
-    v_result := area_array.to_clob();
+    v_result := port_array.to_clob();
+
+  --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
+  EXCEPTION
+    WHEN OTHERS THEN
+        errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
+        
+        v_result := empty_array.to_clob();
+      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
+        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
+        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+  end;
+/****************************************************************************************************/
+ procedure species_json (v_result OUT clob )
+  is
+
+   AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
+  vcronjob                           VARCHAR2(150)  := 'ON DEMAND';
+ 	    vbatchprocess                  VARCHAR2 (150)  := NULL;
+	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
+		vprocedurename                 VARCHAR2 (255)  := 'SPECIES_JSON';
+		vtablename                     VARCHAR2 (50)   := '';	    
+		ilogid                         INT             := 0;
+		VSQL                           varchar2 (4000);		
+        errmsg           VARCHAR2 (2000);
+        sql_stmt             VARCHAR2 (2000);
+        vowner           VARCHAR2 (50)   :='CFDRS';
+        ifsoseq          NUMBER          :=0;
+        v_compliance_start  date;
+        v_compliance_end    date;
+        v_name             VARCHAR2 (25);
+        v_debug  NUMBER;
+        v_loop  NUMBER;
+        v_maxdate date;
+        
+        ITERATION_LENGTH CONSTANT NUMBER := 4000;
+        
+        SPPSYN CONSTANT VARCHAR2(6) := 'SPPSYN';
+        SPPCODE CONSTANT VARCHAR2(7) := 'SPPCODE';
+        SPPNAME CONSTANT VARCHAR2(7) := 'SPPNAME';
+        ITIS CONSTANT VARCHAR2(4) := 'ITIS';
+        
+        species_object  JSON_OBJECT_T := json_object_t();
+        species_array  JSON_ARRAY_T := json_array_t();
+        empty_array  JSON_ARRAY_T := json_array_t();
+  begin
+    DBMS_OUTPUT.ENABLE(1000000);
+    
+    for s_data in (with species_data as (SELECT spp.sppcode sppsyn,
+        spp.sppcode,
+        spp.sppname,
+        nvl(FMP_MGMT.GET_SPECIES_ITIS_FNC('SPPCODE', spp.sppcode), 0) ||
+        CASE
+        WHEN row_number() OVER (PARTITION BY nvl(FMP_MGMT.GET_SPECIES_ITIS_FNC('SPPCODE', spp.sppcode), 0) order by spp.sppcode)
+        > 1
+        THEN '-'||
+        row_number() OVER (PARTITION BY nvl(FMP_MGMT.GET_SPECIES_ITIS_FNC('SPPCODE', spp.sppcode), 0) order by spp.sppcode)
+        ELSE ''
+        END itis,
+        spp.required_uom
+        FROM vtr.vlspptbl spp
+        WHERE spp.public_access = 'Y'
+        AND (FMP_MGMT.GET_SPECIES_ITIS_FNC('SPPCODE', spp.sppcode) is not null OR spp.sppcode = 'NC')
+        ORDER BY spp.sppcode ASC)
+    select s.sppsyn, s.sppcode, s.sppname, s.itis
+    from species_data s) loop
+    
+        species_object.put(SPPSYN, s_data.sppsyn);
+        species_object.put(SPPCODE, s_data.sppcode);
+        species_object.put(SPPNAME, s_data.sppname);
+        species_object.put(ITIS, s_data.itis);
+        
+         --IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+         IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE('Species code:' || species_object.to_clob());
+            DBMS_OUTPUT.PUT_LINE(':'||s_data.sppcode||':');
+         END IF;
+         
+    /* Add here functionality for excluded species */
+    
+        species_array.append(species_object);
+        --Start cleaning JSON object
+        species_object.remove(SPPSYN);
+        species_object.remove(SPPCODE);
+        species_object.remove(SPPNAME);
+        species_object.remove(ITIS);
+    end loop;
+    
+     IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+        DBMS_OUTPUT.PUT_LINE('Species JSON:' || species_array.to_clob());
+     END IF;
+    
+    v_result := species_array.to_clob();
 
   --fso_admin.log_event (vbatchprocess, vmodulename, vprocedurename, ifsoseq, 'SUCCESSFUL', 'Successfully finished procedure.' ,vtablename,NULL,NULL,NULL, ilogid);
   EXCEPTION

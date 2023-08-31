@@ -1177,6 +1177,8 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
         v_debug  NUMBER;
         v_loop  NUMBER;
         v_maxdate date;
+        v_exclude_rpt_type NUMBER := 0;
+        x_exist NUMBER := 0;    -- Flag indicating whether a species is excluded from some report types
         
         ITERATION_LENGTH CONSTANT NUMBER := 4000;
         
@@ -1184,9 +1186,11 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
         SPPCODE CONSTANT VARCHAR2(7) := 'SPPCODE';
         SPPNAME CONSTANT VARCHAR2(7) := 'SPPNAME';
         ITIS CONSTANT VARCHAR2(4) := 'ITIS';
+        X_RPT_TYPE CONSTANT VARCHAR2(10) := 'X_RPT_TYPE';
         
         species_object  JSON_OBJECT_T := json_object_t();
         species_array  JSON_ARRAY_T := json_array_t();
+        exclude_array  JSON_ARRAY_T := json_array_t();
         empty_array  JSON_ARRAY_T := json_array_t();
   begin
     DBMS_OUTPUT.ENABLE(1000000);
@@ -1215,13 +1219,26 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
         species_object.put(SPPNAME, s_data.sppname);
         species_object.put(ITIS, s_data.itis);
         
-         --IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
-         IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+        SELECT count(*) INTO x_exist FROM vtr.vlspecies_exclude
+        WHERE sppcode = s_data.sppcode;
+        
+        IF x_exist > 0 THEN
+            for x_data in (with exclude_data as (select distinct exclude_rpt_type
+                FROM vtr.vlspecies_exclude
+                WHERE sppcode = s_data.sppcode)
+            select x.exclude_rpt_type
+            from exclude_data x) loop
+            
+                exclude_array.append(x_data.exclude_rpt_type);
+            end loop;
+            species_object.put(X_RPT_TYPE, exclude_array);
+            exclude_array := json_array_t();    -- resetting the array
+        END IF;
+        
+         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
             DBMS_OUTPUT.PUT_LINE('Species code:' || species_object.to_clob());
             DBMS_OUTPUT.PUT_LINE(':'||s_data.sppcode||':');
          END IF;
-         
-    /* Add here functionality for excluded species */
     
         species_array.append(species_object);
         --Start cleaning JSON object
@@ -1229,6 +1246,9 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
         species_object.remove(SPPCODE);
         species_object.remove(SPPNAME);
         species_object.remove(ITIS);
+        IF x_exist > 0 THEN
+            species_object.remove(X_RPT_TYPE);
+        END IF;
     end loop;
     
      IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN

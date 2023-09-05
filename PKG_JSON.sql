@@ -9,6 +9,10 @@ create or replace package PKG_JSON IS
     ERROR_DEBUG_LEVEL               CONSTANT SMALLINT := 1;
     OFF_DEBUG_LEVEL                 CONSTANT SMALLINT := 0;
     
+    AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
+    DEALER_PERMIT CONSTANT VARCHAR2(20) := 'DEALER_PERMIT_NUMBER';
+    DEALER_NAME CONSTANT VARCHAR2(11) := 'DEALER_NAME';
+    
     -- End Public Package Constants
     
     --SET debug level to check what is happening
@@ -152,8 +156,6 @@ END ;
 /****************************************************************************************************/   
  procedure chart_area_json (v_result OUT clob )
   is
-
-   AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
   vcronjob                           VARCHAR2(150)  := 'ON DEMAND';
  	    vbatchprocess                  VARCHAR2 (150)  := NULL;
 	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
@@ -208,15 +210,13 @@ END ;
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
         
         v_result := empty_array.to_clob();
-      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
-        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
-        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        END IF;
   end;
 /****************************************************************************************************/    
  procedure chart_area_vtr_json (v_result OUT clob )
   is
-
-   AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
   vcronjob                           VARCHAR2(150)  := 'ON DEMAND';
  	    vbatchprocess                  VARCHAR2 (150)  := NULL;
 	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
@@ -269,9 +269,9 @@ END ;
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
         
         v_result := empty_array.to_clob();
-      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
-        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
-        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        END IF;
   end;
 /****************************************************************************************************/
  procedure gear_json (v_result OUT clob )
@@ -461,9 +461,9 @@ END ;
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
         
         v_result := empty_array.to_clob();
-      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
-        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
-        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        END IF;
   end;
 /****************************************************************************************************/
 procedure dealer_json (v_input IN CLOB, v_result OUT clob )
@@ -494,9 +494,6 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         
         ITERATION_LENGTH CONSTANT NUMBER := 4000;
         
-        DEALER_PERMIT CONSTANT VARCHAR2(20) := 'DEALER_PERMIT_NUMBER';
-        DEALER_NAME CONSTANT VARCHAR2(11) := 'DEALER_NAME';
-      
         dealer_object  JSON_OBJECT_T := json_object_t();
         dealer_array  JSON_ARRAY_T := json_array_t();
         empty_array  JSON_ARRAY_T := json_array_t();
@@ -506,7 +503,7 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
     validate_input (v_char_input , v_filecode , v_timestamp);
     
     IF (v_filecode = 0) THEN
-        v_result := '{}';  -- Return empty JSON if something goes wrong
+        v_result := empty_array.to_clob();  -- Return empty JSON if something goes wrong
         return;
     ELSIF (v_filecode = 1) THEN
         for d_data in (with dealer_data as (SELECT  DEALER_PERMIT_NUMBER,  upper(DEALER_NAME) DEALER_NAME
@@ -617,9 +614,9 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
         
         v_result := empty_array.to_clob();
-      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
-        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
-        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        END IF;
   end;
 /****************************************************************************************************/
  procedure dealer_jira_json (v_result OUT clob )
@@ -647,8 +644,6 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         
         ITERATION_LENGTH CONSTANT NUMBER := 4000;
         
-        DEALER_PERMIT CONSTANT VARCHAR2(20) := 'DEALER_PERMIT_NUMBER';
-        DEALER_NAME CONSTANT VARCHAR2(11) := 'DEALER_NAME';
         DEALER_PERMIT_WITH_NAME CONSTANT VARCHAR2(23) := 'DEALER_PERMIT_WITH_NAME';
       
         dealer_object  JSON_OBJECT_T := json_object_t();
@@ -705,9 +700,9 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
         
         v_result := empty_array.to_clob();
-      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
-        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
-        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        END IF;
   end;
 /****************************************************************************************************/
  procedure vessel_jira_json (v_result OUT clob )
@@ -793,9 +788,9 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
         
         v_result := empty_array.to_clob();
-      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
-        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
-        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        END IF;
   end;
 /****************************************************************************************************/
  procedure operator_json (v_input IN CLOB, v_result OUT clob )
@@ -840,7 +835,7 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
     validate_input (v_char_input , v_filecode , v_timestamp);
     
     IF (v_filecode = 0) THEN
-        v_result := '{}';  -- Return empty JSON if something goes wrong
+        v_result := empty_array.to_clob();  -- Return empty JSON if something goes wrong
         return;
     ELSIF (v_filecode = 1) THEN
         for o_data in (with operator_data as (SELECT  OPERATOR_KEY,  
@@ -943,9 +938,9 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
         
         v_result := empty_array.to_clob();
-      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
-        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
-        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        END IF;
   end;
 /****************************************************************************************************/
 procedure permit_json (v_input IN CLOB, v_result OUT clob )
@@ -989,7 +984,7 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
     validate_input (v_char_input , v_filecode , v_timestamp);
     
     IF (v_filecode = 0) THEN
-        v_result := '{}';  -- Return empty JSON if something goes wrong
+        v_result := empty_array.to_clob();  -- Return empty JSON if something goes wrong
         return;
     ELSIF (v_filecode = 1) THEN
         for p_data in (with permit_data as (SELECT PNUM, upper(VES_NAME) VES_NAME, HULL_ID
@@ -1089,15 +1084,13 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
         
         v_result := empty_array.to_clob();
-      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
-        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
-        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        END IF;
   end;
 /****************************************************************************************************/
  procedure ports_api_json (v_result OUT clob )
   is
-
-   AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
   vcronjob                           VARCHAR2(150)  := 'ON DEMAND';
  	    vbatchprocess                  VARCHAR2 (150)  := NULL;
 	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
@@ -1151,15 +1144,13 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
         
         v_result := empty_array.to_clob();
-      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
-        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
-        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        END IF;
   end;
 /****************************************************************************************************/
  procedure species_json (v_result OUT clob )
   is
-
-   AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
   vcronjob                           VARCHAR2(150)  := 'ON DEMAND';
  	    vbatchprocess                  VARCHAR2 (150)  := NULL;
 	    vmodulename                    varchar2 (150)  := 'VTR_JSON'; 
@@ -1263,9 +1254,9 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
         errmsg := errmsg || ' SQL Error on ' || vtablename ||' : ' || SQLERRM;
         
         v_result := empty_array.to_clob();
-      --  set_run_status(ifsoseq, 'ABORT', -1, errmsg);
-        --fso_admin.log_event ( vbatchprocess, vmodulename, vprocedurename, ifsoseq,'FAILED', 'Finished abnormally - '||errmsg,NULL,NULL,NULL,NULL, ilogid );
-        DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        IF ( isi_CurrentDebugLevel >= ERROR_DEBUG_LEVEL ) THEN
+            DBMS_OUTPUT.PUT_LINE(VPROCEDURENAME || 'finished abnormally'||ERRMSG);
+        END IF;
   end;
 /****************************************************************************************************/
 END PKG_JSON;

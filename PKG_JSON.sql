@@ -33,6 +33,10 @@ create or replace package PKG_JSON IS
     -- MAIN procedure for generating dealer JSON 
     PROCEDURE dealer_json (v_input IN CLOB, v_result OUT CLOB );
     
+    -- Procedure for incrementing dealer array
+    PROCEDURE dealer_array_append (dealer_array IN OUT JSON_ARRAY_T,
+                                    dealer_permit_number IN NUMBER, dlr_name IN VARCHAR2 );
+    
     -- Procedure for generating JIRA dealer JSON 
     PROCEDURE dealer_jira_json (v_result OUT CLOB );    
 
@@ -466,6 +470,25 @@ END ;
         END IF;
   end;
 /****************************************************************************************************/
+procedure dealer_array_append (dealer_array IN OUT JSON_ARRAY_T,
+                                dealer_permit_number IN NUMBER, dlr_name IN VARCHAR2)
+    is
+        dealer_object  JSON_OBJECT_T := json_object_t();
+begin
+            dealer_object.put(DEALER_PERMIT, dealer_permit_number);
+            dealer_object.put(DEALER_NAME, dlr_name);
+
+             IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+                DBMS_OUTPUT.PUT_LINE('Dealer record:' || dealer_object.to_clob());
+             END IF;
+             
+            --Add object to array
+            dealer_array.append(dealer_object);
+            --START cleaning of JSON object. This is needed per key
+            dealer_object.remove(DEALER_PERMIT);
+            dealer_object.remove(DEALER_NAME);
+end;
+/****************************************************************************************************/
 procedure dealer_json (v_input IN CLOB, v_result OUT clob )
   is
         
@@ -494,7 +517,6 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         
         ITERATION_LENGTH CONSTANT NUMBER := 4000;
         
-        dealer_object  JSON_OBJECT_T := json_object_t();
         dealer_array  JSON_ARRAY_T := json_array_t();
         empty_array  JSON_ARRAY_T := json_array_t();
   begin
@@ -537,7 +559,7 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
                 SELECT 99998 as dealer_permit_number,'Home Consumption' as DEALER_NAME FROM dual)  )
         select d.dealer_permit_number, d.DEALER_NAME
         from dealer_data d) loop
-        
+        /*
             dealer_object.put(DEALER_PERMIT, d_data.DEALER_PERMIT_NUMBER);
             dealer_object.put(DEALER_NAME, d_data.DEALER_NAME);
 
@@ -550,6 +572,8 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
             --START cleaning of JSON object. This is needed per key
             dealer_object.remove(DEALER_PERMIT);
             dealer_object.remove(DEALER_NAME);
+        */
+            dealer_array_append (dealer_array, d_data.DEALER_PERMIT_NUMBER, d_data.DEALER_NAME);
         end loop;
     ELSE
         for d_data in (with dealer_data as (SELECT  DEALER_PERMIT_NUMBER,  upper(DEALER_NAME) DEALER_NAME
@@ -579,19 +603,8 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
                 ORDER BY dealer_permit_number ASC)  )
         select d.dealer_permit_number, d.DEALER_NAME
         from dealer_data d) loop
-        
-            dealer_object.put(DEALER_PERMIT, d_data.DEALER_PERMIT_NUMBER);
-            dealer_object.put(DEALER_NAME, d_data.DEALER_NAME);
-    
-             IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
-                DBMS_OUTPUT.PUT_LINE('Dealer record:' || dealer_object.to_clob());
-             END IF;
-             
-            --Add object to array
-            dealer_array.append(dealer_object);
-            --START cleaning of JSON object. This is needed per key
-            dealer_object.remove(DEALER_PERMIT);
-            dealer_object.remove(DEALER_NAME);
+            
+            dealer_array_append (dealer_array, d_data.DEALER_PERMIT_NUMBER, d_data.DEALER_NAME);
         end loop;
     END IF;
     

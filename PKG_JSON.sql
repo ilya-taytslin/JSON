@@ -19,7 +19,7 @@ create or replace package PKG_JSON IS
     PROCEDURE SET_SESSION_DEBUG_LEVEL( asi_DebugLevel  IN SMALLINT );
     
     --Validate the input JSON if appropriate
-    PROCEDURE validate_input (v_input IN VARCHAR2, v_filecode OUT NUMBER, v_timestamp OUT NUMBER);
+    PROCEDURE validate_input (v_input IN CLOB, v_filecode OUT NUMBER, v_timestamp OUT NUMBER);
 
     -- MAIN procedure for generating chart area JSON via NOAA schema lookup
     PROCEDURE chart_area_json (v_result OUT CLOB );
@@ -61,7 +61,14 @@ END PKG_JSON;
 create or replace PACKAGE BODY PKG_JSON AS
 
     isi_CurrentDebugLevel SMALLINT := OFF_DEBUG_LEVEL;
-
+    AREA_CODE CONSTANT VARCHAR2(9) := 'AREA_CODE';
+    DEALER_PERMIT CONSTANT VARCHAR2(20) := 'DEALER_PERMIT_NUMBER';
+    DEALER_NAME CONSTANT VARCHAR2(11) := 'DEALER_NAME';
+    NAME_FIRST CONSTANT VARCHAR2(10) := 'NAME_FIRST';
+    NAME_MIDDLE CONSTANT VARCHAR2(11) := 'NAME_MIDDLE';
+    NAME_LAST CONSTANT VARCHAR2(9) := 'NAME_LAST';
+    OPERATOR_KEY CONSTANT VARCHAR2(12) := 'OPERATOR_KEY';
+    
     PROCEDURE SET_SESSION_DEBUG_LEVEL( asi_DebugLevel  IN SMALLINT )
     IS 
         lExcpt_InvalidLoggingLevel EXCEPTION;
@@ -84,10 +91,10 @@ create or replace PACKAGE BODY PKG_JSON AS
     
     END SET_SESSION_DEBUG_LEVEL;
 /****************************************************************************************************/   
-PROCEDURE validate_input (v_input IN VARCHAR2, v_filecode OUT NUMBER, v_timestamp OUT NUMBER)
+PROCEDURE validate_input (v_input IN CLOB, v_filecode OUT NUMBER, v_timestamp OUT NUMBER)
       --  v_input       CLOB typecast to VARCHAR2, presumably a short JSON file
       --  v_filecode    1: full, 2: incremental, 0: invalid
-      --  v_timestamp   Must be a 10 digit number  
+      --  v_timestamp   Must be a number  
    IS
     ja JSON_ARRAY_T;
     jo JSON_OBJECT_T;
@@ -95,19 +102,24 @@ PROCEDURE validate_input (v_input IN VARCHAR2, v_filecode OUT NUMBER, v_timestam
     keys        JSON_KEY_LIST;
     keys_string VARCHAR2(100);
     v_filetype VARCHAR2(100);
-    v_timestring VARCHAR2(10);
+    v_timestring VARCHAR2(100);
+    v_unix_time NUMBER;
+    v_ten_years_back NUMBER;
 
 begin
   v_filecode := 0;
   v_timestamp := 0;
+  SELECT (CAST (systimestamp at time zone 'UTC' as date) - date '1970-01-01') * 86400 INTO v_unix_time FROM DUAL;
+  v_ten_years_back := v_unix_time - (86400 * 365 * 10);
+  
   ja := new JSON_ARRAY_T;
   IF (v_input is json (STRICT)) THEN
-    je :=  JSON_ELEMENT_T.parse(lower(v_input));  /* JSON operations are case-sensitive */
+    je :=  JSON_ELEMENT_T.parse(v_input);  /* JSON operations are case-sensitive */
   ELSE
     DBMS_OUTPUT.put_line('Not a JSON string');
         return;
   END IF;
-  
+
   IF (je.is_Object) THEN
       jo := treat(je AS JSON_OBJECT_T);
       keys := jo.get_keys;
@@ -116,42 +128,41 @@ begin
         return;
       END IF;
 
-      IF (keys(1) = 'filetype') THEN
-        v_filetype := jo.get_string('filetype');
-        DBMS_OUTPUT.put_line(v_filetype);
-      ELSE
-        DBMS_OUTPUT.put_line('First JSON element is not "filetype"');
-        return;
-      END IF;
+      v_filetype := jo.get_string('filetype');
+      v_timestring := jo.get_string('timestamp');
       
-      IF (v_filetype = 'full') THEN     -- First JSON element must be either 
-        v_filecode := 1;                  -- "filetype":"full" or "filetype":"incremental" 
+      IF (length(v_filetype) = 0 ) THEN
+        DBMS_OUTPUT.put_line('No filetype');
+        return;
+      ELSE
+        DBMS_OUTPUT.put_line(v_filetype);
+      END IF;
+
+      IF (v_filetype = 'full') THEN 
+        v_filecode := 1; 
         return;
       ELSIF (v_filetype <> 'incremental') THEN
         DBMS_OUTPUT.put_line('Invalid filetype');
         return;
       END IF;
-      
+
       IF (keys.count < 2) THEN      -- We get this far only with "filetype":"incremental" 
         DBMS_OUTPUT.put_line('Timestamp not specified');
         return;
       END IF;
-      
-      IF (keys(2) = 'timestamp') THEN
-        v_timestring := substr(jo.get_string('timestamp'),1,10);
-        DBMS_OUTPUT.put_line(v_timestring);
-      ELSE
-        DBMS_OUTPUT.put_line('Second JSON element is not "timestamp"');
+
+      IF ( VALIDATE_CONVERSION(v_timestring AS NUMBER) = 0) THEN
+        DBMS_OUTPUT.put_line('Timestamp must be a number');
         return;
       END IF;
-      
-      IF (length(v_timestring) < 10 OR VALIDATE_CONVERSION(v_timestring AS NUMBER) = 0) THEN
-        DBMS_OUTPUT.put_line('Not a valid timestamp');
+
+      v_timestamp := TO_NUMBER(v_timestring);
+      IF ( v_timestring > v_unix_time OR v_timestring < v_ten_years_back) THEN
+        DBMS_OUTPUT.put_line('Timestamp must be between 10 years ago and now');
         return;
       END IF;
       
       v_filecode := 2;
-      v_timestamp := TO_NUMBER(v_timestring);
   ELSE
     v_filecode := 0;
     DBMS_OUTPUT.put_line('Not a JSON');
@@ -513,7 +524,6 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         v_outputed_length NUMBER := 1;   -- Because first position of a string in PL/SQL is 1, not 0
         v_timestamp NUMBER := 0;
         v_filecode NUMBER := 0;
-        v_char_input VARCHAR2(100) := '';
         
         ITERATION_LENGTH CONSTANT NUMBER := 4000;
         
@@ -521,8 +531,7 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         empty_array  JSON_ARRAY_T := json_array_t();
   begin
     DBMS_OUTPUT.ENABLE(1000000);
-    v_char_input := substr(NVL(v_input,'{}'),1,100);
-    validate_input (v_char_input , v_filecode , v_timestamp);
+    validate_input (v_input , v_filecode , v_timestamp);
     
     IF (v_filecode = 0) THEN
         v_result := empty_array.to_clob();  -- Return empty JSON if something goes wrong
@@ -806,6 +815,29 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         END IF;
   end;
 /****************************************************************************************************/
+procedure operator_array_append (operator_array IN OUT JSON_ARRAY_T, op_key IN NUMBER, 
+                                first_name IN VARCHAR2, middle_name IN VARCHAR2, last_name IN VARCHAR2)
+    is
+        operator_object  JSON_OBJECT_T := json_object_t();
+begin
+            operator_object.put(OPERATOR_KEY, op_key);
+            operator_object.put(NAME_FIRST, first_name);
+            operator_object.put(NAME_MIDDLE, middle_name);
+            operator_object.put(NAME_LAST, last_name);
+
+             IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
+                DBMS_OUTPUT.PUT_LINE('Operator record:' || operator_object.to_clob());
+             END IF;
+             
+            --Add object to array
+            operator_array.append(operator_object);
+            --START cleaning of JSON object. This is needed per key
+            operator_object.remove(OPERATOR_KEY);
+            operator_object.remove(NAME_FIRST);
+            operator_object.remove(NAME_MIDDLE);
+            operator_object.remove(NAME_LAST);
+end;
+/****************************************************************************************************/
  procedure operator_json (v_input IN CLOB, v_result OUT clob )
   is
         
@@ -830,22 +862,15 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
         v_outputed_length NUMBER := 1;   -- Because first position of a string in PL/SQL is 1, not 0
         v_timestamp NUMBER := 0;
         v_filecode NUMBER := 0;
-        v_char_input VARCHAR2(100) := '';
         
         ITERATION_LENGTH CONSTANT NUMBER := 4000;
-        
-        OPERATOR_KEY CONSTANT VARCHAR2(12) := 'OPERATOR_KEY';
-        NAME_FIRST CONSTANT VARCHAR2(10) := 'NAME_FIRST';
-        NAME_MIDDLE CONSTANT VARCHAR2(11) := 'NAME_MIDDLE';
-        NAME_LAST CONSTANT VARCHAR2(9) := 'NAME_LAST';
       
         operator_object  JSON_OBJECT_T := json_object_t();
         operator_array  JSON_ARRAY_T := json_array_t();
         empty_array  JSON_ARRAY_T := json_array_t();
   begin
     DBMS_OUTPUT.ENABLE(1000000);
-    v_char_input := substr(NVL(v_input,'{}'),1,100);
-    validate_input (v_char_input , v_filecode , v_timestamp);
+    validate_input (v_input , v_filecode , v_timestamp);
     
     IF (v_filecode = 0) THEN
         v_result := empty_array.to_clob();  -- Return empty JSON if something goes wrong
@@ -869,23 +894,9 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
                 ORDER BY jo.operator_key ASC)  )
         select o.operator_key, o.name_first, o.name_middle, o.name_last
         from operator_data o) loop
-        
-            operator_object.put(OPERATOR_KEY, o_data.OPERATOR_KEY);
-            operator_object.put(NAME_FIRST, o_data.NAME_FIRST);
-            operator_object.put(NAME_MIDDLE, o_data.NAME_MIDDLE);
-            operator_object.put(NAME_LAST, o_data.NAME_LAST);
 
-             IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
-                DBMS_OUTPUT.PUT_LINE('Dealer record:' || operator_object.to_clob());
-             END IF;
-             
-            --Add object to array
-            operator_array.append(operator_object);
-            --START cleaning of JSON object. This is needed per key
-            operator_object.remove(OPERATOR_KEY);
-            operator_object.remove(NAME_FIRST);
-            operator_object.remove(NAME_MIDDLE);
-            operator_object.remove(NAME_LAST);
+            operator_array_append (operator_array, o_data.OPERATOR_KEY, 
+                                   o_data.NAME_FIRST, o_data.NAME_MIDDLE, o_data.NAME_LAST);
         end loop;
     ELSE
         for o_data in (with basetime as (select timestamp '1970-01-01 00:00:00' + (v_timestamp / 86400) - (5/24) t from dual)
@@ -912,23 +923,9 @@ procedure dealer_json (v_input IN CLOB, v_result OUT clob )
             AND (t1.date_cancelled is null OR t1.date_cancelled > sysdate - 365)
             AND o.operator_key NOT IN (SELECT b.operator_key FROM baseline b)
             ORDER BY operator_key ASC) loop
-        
-            operator_object.put(OPERATOR_KEY, o_data.OPERATOR_KEY);
-            operator_object.put(NAME_FIRST, o_data.NAME_FIRST);
-            operator_object.put(NAME_MIDDLE, o_data.NAME_MIDDLE);
-            operator_object.put(NAME_LAST, o_data.NAME_LAST);
 
-             IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
-                DBMS_OUTPUT.PUT_LINE('Dealer record:' || operator_object.to_clob());
-             END IF;
-             
-            --Add object to array
-            operator_array.append(operator_object);
-            --START cleaning of JSON object. This is needed per key
-            operator_object.remove(OPERATOR_KEY);
-            operator_object.remove(NAME_FIRST);
-            operator_object.remove(NAME_MIDDLE);
-            operator_object.remove(NAME_LAST);
+            operator_array_append (operator_array, o_data.OPERATOR_KEY, 
+                                   o_data.NAME_FIRST, o_data.NAME_MIDDLE, o_data.NAME_LAST);
         end loop;
     END IF;
     
@@ -980,7 +977,6 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
         v_outputed_length NUMBER := 1;   -- Because first position of a string in PL/SQL is 1, not 0
         v_timestamp NUMBER := 0;
         v_filecode NUMBER := 0;
-        v_char_input VARCHAR2(100) := '';
         
         ITERATION_LENGTH CONSTANT NUMBER := 4000;
         
@@ -993,8 +989,7 @@ procedure permit_json (v_input IN CLOB, v_result OUT clob )
         empty_array  JSON_ARRAY_T := json_array_t();
   begin
     DBMS_OUTPUT.ENABLE(1000000);
-    v_char_input := substr(NVL(v_input,'{}'),1,100);
-    validate_input (v_char_input , v_filecode , v_timestamp);
+    validate_input (v_input , v_filecode , v_timestamp);
     
     IF (v_filecode = 0) THEN
         v_result := empty_array.to_clob();  -- Return empty JSON if something goes wrong

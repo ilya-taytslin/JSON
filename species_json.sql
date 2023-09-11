@@ -58,12 +58,9 @@ create or replace procedure species_json (v_result OUT clob )
     select s.sppsyn, s.sppcode, s.sppname, s.itis, s.exclude_rpt_type
     from species_data s) loop
     
-        IF (s_data.exclude_rpt_type IS NOT NULL) THEN
-            exclude_array.append(s_data.exclude_rpt_type);
-        END IF;
-
         IF (s_data.sppsyn = v_last_sppcode) THEN
             IF (s_data.exclude_rpt_type IS NOT NULL) THEN
+                exclude_array.append(s_data.exclude_rpt_type);
                 species_object.remove(X_RPT_TYPE);
                 species_object.put(X_RPT_TYPE, exclude_array);
             END IF;
@@ -81,31 +78,13 @@ create or replace procedure species_json (v_result OUT clob )
             species_object.put(SPPCODE, s_data.sppcode);
             species_object.put(SPPNAME, s_data.sppname);
             species_object.put(ITIS, s_data.itis);
-/*
-        SELECT count(*) INTO x_exist FROM vtr.vlspecies_exclude
-        WHERE sppcode = s_data.sppcode;
-
-        IF x_exist > 0 THEN
-            for x_data in (with exclude_data as (select distinct exclude_rpt_type
-                FROM vtr.vlspecies_exclude
-                WHERE sppcode = s_data.sppcode)
-            select x.exclude_rpt_type
-            from exclude_data x) loop
-
-                exclude_array.append(x_data.exclude_rpt_type);
-            end loop;
-            species_object.put(X_RPT_TYPE, exclude_array);
-            exclude_array := json_array_t();    -- resetting the array
+       
+            IF (s_data.exclude_rpt_type IS NOT NULL) THEN
+                exclude_array.append(s_data.exclude_rpt_type);
+                species_object.put(X_RPT_TYPE, exclude_array);
+            END IF;
         END IF;
-        */
-  /*
-         IF ( isi_CurrentDebugLevel >= VERBOSE_DEBUG_LEVEL ) THEN
-            DBMS_OUTPUT.PUT_LINE('Species code:' || species_object.to_clob());
-            DBMS_OUTPUT.PUT_LINE(':'||s_data.sppcode||':');
-         END IF;
-    */
-        END IF;
-
+        
         v_last_sppcode := s_data.sppsyn;
     end loop;
 
